@@ -14,7 +14,7 @@ module ActionView
   #
   # Whenever the +render+ method is called on the base +Renderer+ class, a new
   # renderer object of the correct type is created, and the +render+ method on
-  # that new object is called in turn. This abstracts the setup and rendering
+  # that new object is called in turn. This abstracts the set up and rendering
   # into a separate classes for partials and templates.
   class AbstractRenderer #:nodoc:
     delegate :template_exists?, :any_templates?, :formats, to: :@lookup_context
@@ -59,11 +59,10 @@ module ActionView
     end
 
     class RenderedTemplate # :nodoc:
-      attr_reader :body, :layout, :template
+      attr_reader :body, :template
 
-      def initialize(body, layout, template)
+      def initialize(body, template)
         @body = body
-        @layout = layout
         @template = template
       end
 
@@ -75,7 +74,6 @@ module ActionView
     end
 
     private
-
       def extract_details(options) # :doc:
         @lookup_context.registered_details.each_with_object({}) do |key, details|
           value = options[key]
@@ -97,8 +95,8 @@ module ActionView
         @lookup_context.formats = formats | @lookup_context.formats
       end
 
-      def build_rendered_template(content, template, layout = nil)
-        RenderedTemplate.new content, layout, template
+      def build_rendered_template(content, template)
+        RenderedTemplate.new content, template
       end
 
       def build_rendered_collection(templates, spacer)

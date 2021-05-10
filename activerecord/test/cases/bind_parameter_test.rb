@@ -93,7 +93,7 @@ if ActiveRecord::Base.connection.prepared_statements
       def test_statement_cache_with_in_clause
         @connection.clear_cache!
 
-        topics = Topic.where(id: [1, 3])
+        topics = Topic.where(id: [1, 3]).order(:id)
         assert_equal [1, 3], topics.map(&:id)
         assert_not_includes statement_cache, to_sql_key(topics.arel)
       end
@@ -184,7 +184,7 @@ if ActiveRecord::Base.connection.prepared_statements
             name: "SQL",
             sql: "select * from topics where id = ?",
             binds: binds,
-            type_casted_binds: @connection.type_casted_binds(binds)
+            type_casted_binds: @connection.send(:type_casted_binds, binds)
           }
 
           event = ActiveSupport::Notifications::Event.new(

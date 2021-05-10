@@ -9,13 +9,18 @@ module ActiveModel
       # 4 bytes means an integer as opposed to smallint etc.
       DEFAULT_LIMIT = 4
 
-      def initialize(*)
+      def initialize(*, **)
         super
         @range = min_value...max_value
       end
 
       def type
         :integer
+      end
+
+      def deserialize(value)
+        return if value.blank?
+        value.to_i
       end
 
       def serialize(value)

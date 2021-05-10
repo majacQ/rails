@@ -13,7 +13,10 @@ module ActiveRecord
         const_get(name)
       end
 
-      V6_0 = Current
+      V6_1 = Current
+
+      class V6_0 < V6_1
+      end
 
       class V5_2 < V6_0
         module TableDefinition
@@ -26,6 +29,16 @@ module ActiveRecord
         module CommandRecorder
           def invert_transaction(args, &block)
             [:transaction, args, block]
+          end
+
+          def invert_change_column_comment(args)
+            table_name, column_name, comment = args
+            [:change_column_comment, [table_name, column_name, from: comment, to: comment]]
+          end
+
+          def invert_change_table_comment(args)
+            table_name, comment = args
+            [:change_table_comment, [table_name, from: comment, to: comment]]
           end
         end
 
@@ -87,7 +100,7 @@ module ActiveRecord
           end
         end
 
-        def create_table(table_name, options = {})
+        def create_table(table_name, **options)
           if connection.adapter_name == "Mysql2"
             super(table_name, options: "ENGINE=InnoDB", **options)
           else
@@ -109,7 +122,7 @@ module ActiveRecord
           alias :belongs_to :references
         end
 
-        def create_table(table_name, options = {})
+        def create_table(table_name, **options)
           if connection.adapter_name == "PostgreSQL"
             if options[:id] == :uuid && !options.key?(:default)
               options[:default] = "uuid_generate_v4()"
@@ -137,7 +150,7 @@ module ActiveRecord
           super
         end
 
-        def add_column(table_name, column_name, type, options = {})
+        def add_column(table_name, column_name, type, **options)
           if type == :primary_key
             type = :integer
             options[:primary_key] = true

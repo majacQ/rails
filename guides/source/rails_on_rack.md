@@ -13,7 +13,7 @@ After reading this guide, you will know:
 
 --------------------------------------------------------------------------------
 
-WARNING: This guide assumes a working knowledge of Rack protocol and Rack concepts such as middlewares, url maps, and `Rack::Builder`.
+WARNING: This guide assumes a working knowledge of Rack protocol and Rack concepts such as middlewares, URL maps, and `Rack::Builder`.
 
 Introduction to Rack
 --------------------
@@ -97,7 +97,7 @@ but is built for better flexibility and more features to meet Rails' requirement
 Rails has a handy command for inspecting the middleware stack in use:
 
 ```bash
-$ rails middleware
+$ bin/rails middleware
 ```
 
 For a freshly generated Rails application, this might produce something like:
@@ -181,7 +181,7 @@ And now if you inspect the middleware stack, you'll find that `Rack::Runtime` is
 not a part of it.
 
 ```bash
-$ rails middleware
+$ bin/rails middleware
 (in /Users/lifo/Rails/blog)
 use ActionDispatch::Static
 use #<ActiveSupport::Cache::Strategy::LocalCache::Middleware:0x00000001c304c8>

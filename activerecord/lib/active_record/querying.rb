@@ -10,13 +10,13 @@ module ActiveRecord
       :first_or_create, :first_or_create!, :first_or_initialize,
       :find_or_create_by, :find_or_create_by!, :find_or_initialize_by,
       :create_or_find_by, :create_or_find_by!,
-      :destroy_all, :delete_all, :update_all, :destroy_by, :delete_by,
+      :destroy_all, :delete_all, :update_all, :touch_all, :destroy_by, :delete_by,
       :find_each, :find_in_batches, :in_batches,
       :select, :reselect, :order, :reorder, :group, :limit, :offset, :joins, :left_joins, :left_outer_joins,
-      :where, :rewhere, :preload, :eager_load, :includes, :from, :lock, :readonly, :extending, :or,
-      :having, :create_with, :distinct, :references, :none, :unscope, :merge, :except, :only,
-      :count, :average, :minimum, :maximum, :sum, :calculate,
-      :pluck, :pick, :ids
+      :where, :rewhere, :preload, :extract_associated, :eager_load, :includes, :from, :lock, :readonly, :extending, :or,
+      :having, :create_with, :distinct, :references, :none, :unscope, :optimizer_hints, :merge, :except, :only,
+      :count, :average, :minimum, :maximum, :sum, :calculate, :annotate,
+      :pluck, :pick, :ids, :strict_loading
     ].freeze # :nodoc:
     delegate(*QUERYING_METHODS, to: :all)
 
@@ -36,7 +36,7 @@ module ActiveRecord
     #
     #   # A simple SQL query spanning multiple tables
     #   Post.find_by_sql "SELECT p.title, c.author FROM posts p, comments c WHERE p.id = c.post_id"
-    #   # => [#<Post:0x36bff9c @attributes={"title"=>"Ruby Meetup", "first_name"=>"Quentin"}>, ...]
+    #   # => [#<Post:0x36bff9c @attributes={"title"=>"Ruby Meetup", "author"=>"Quentin"}>, ...]
     #
     # You can use the same string replacement techniques as you can with <tt>ActiveRecord::QueryMethods#where</tt>:
     #

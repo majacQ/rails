@@ -47,6 +47,7 @@ module ActiveRecord
     end
 
     private
+      attr_accessor :table_name
 
       def initialize(connection, options = {})
         @connection = connection
@@ -71,8 +72,8 @@ module ActiveRecord
 # of editing this file, please use the migrations feature of Active Record to
 # incrementally modify your database, and then regenerate this schema definition.
 #
-# This file is the source Rails uses to define your schema when running `rails
-# db:schema:load`. When creating a new database, `rails db:schema:load` tends to
+# This file is the source Rails uses to define your schema when running `bin/rails
+# db:schema:load`. When creating a new database, `bin/rails db:schema:load` tends to
 # be faster and is potentially less error prone than running all of your
 # migrations from scratch. Old migrations may fail to apply correctly if those
 # migrations use external dependencies or application code.
@@ -110,6 +111,8 @@ HEADER
       def table(table, stream)
         columns = @connection.columns(table)
         begin
+          self.table_name = table
+
           tbl = StringIO.new
 
           # first dump primary key column
@@ -143,7 +146,11 @@ HEADER
             raise StandardError, "Unknown type '#{column.sql_type}' for column '#{column.name}'" unless @connection.valid_type?(column.type)
             next if column.name == pk
             type, colspec = column_spec(column)
-            tbl.print "    t.#{type} #{column.name.inspect}"
+            if type.is_a?(Symbol)
+              tbl.print "    t.#{type} #{column.name.inspect}"
+            else
+              tbl.print "    t.column #{column.name.inspect}, #{type.inspect}"
+            end
             tbl.print ", #{format_colspec(colspec)}" if colspec.present?
             tbl.puts
           end
@@ -159,6 +166,8 @@ HEADER
           stream.puts "# Could not dump table #{table.inspect} because of following #{e.class}"
           stream.puts "#   #{e.message}"
           stream.puts
+        ensure
+          self.table_name = nil
         end
       end
 

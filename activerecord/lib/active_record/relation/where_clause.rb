@@ -70,16 +70,34 @@ module ActiveRecord
           predicates == other.predicates
       end
 
-      def invert
+      def invert(as = :nand)
+        if predicates.size == 1
+          inverted_predicates = [ invert_predicate(predicates.first) ]
+        elsif as == :nor
+          inverted_predicates = predicates.map { |node| invert_predicate(node) }
+        else
+          inverted_predicates = [ Arel::Nodes::Not.new(ast) ]
+        end
+
         WhereClause.new(inverted_predicates)
       end
 
       def self.empty
-        @empty ||= new([])
+        @empty ||= new([]).tap(&:referenced_columns).freeze
+      end
+
+      def contradiction?
+        predicates.any? do |x|
+          case x
+          when Arel::Nodes::In
+            Array === x.right && x.right.empty?
+          when Arel::Nodes::Equality
+            x.right.respond_to?(:unboundable?) && x.right.unboundable?
+          end
+        end
       end
 
       protected
-
         attr_reader :predicates
 
         def referenced_columns
@@ -113,10 +131,6 @@ module ActiveRecord
 
         def equality_node?(node)
           node.respond_to?(:operator) && node.operator == :==
-        end
-
-        def inverted_predicates
-          predicates.map { |node| invert_predicate(node) }
         end
 
         def invert_predicate(node)

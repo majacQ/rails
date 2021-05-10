@@ -18,7 +18,19 @@ require "support/stubs/strong_parameters"
 
 module ActiveRecord
   class WhereTest < ActiveRecord::TestCase
-    fixtures :posts, :edges, :authors, :author_addresses, :binaries, :essays, :cars, :treasures, :price_estimates, :topics
+    fixtures :posts, :comments, :edges, :authors, :author_addresses, :binaries, :essays, :cars, :treasures, :price_estimates, :topics
+
+    def test_in_clause_is_correctly_sliced
+      assert_called(Author.connection, :in_clause_length, returns: 1) do
+        david = authors(:david)
+        assert_equal [david], Author.where(name: "David", id: [1, 2])
+      end
+    end
+
+    def test_type_casting_nested_joins
+      comment = comments(:eager_other_comment1)
+      assert_equal [comment], Comment.joins(post: :author).where(authors: { id: "2-foo" })
+    end
 
     def test_where_copies_bind_params
       author = authors(:david)
@@ -115,13 +127,75 @@ module ActiveRecord
       assert_equal expected.to_sql, actual.to_sql
     end
 
-    def test_polymorphic_shallow_where_not
-      treasure = treasures(:sapphire)
+    def test_where_not_polymorphic_association
+      sapphire = treasures(:sapphire)
 
-      expected = [price_estimates(:diamond), price_estimates(:honda)]
-      actual   = PriceEstimate.where.not(estimate_of: treasure)
+      all = [treasures(:diamond), sapphire, cars(:honda), sapphire]
+      assert_equal all, PriceEstimate.all.sort_by(&:id).map(&:estimate_of)
 
-      assert_equal expected.sort_by(&:id), actual.sort_by(&:id)
+      actual = PriceEstimate.where.not(estimate_of: sapphire)
+      only = PriceEstimate.where(estimate_of: sapphire)
+
+      expected = all - [sapphire]
+      assert_equal expected, actual.sort_by(&:id).map(&:estimate_of)
+      assert_equal all - expected, only.sort_by(&:id).map(&:estimate_of)
+    end
+
+    def test_where_not_polymorphic_id_and_type_as_nand
+      sapphire = treasures(:sapphire)
+
+      all = [treasures(:diamond), sapphire, cars(:honda), sapphire]
+      assert_equal all, PriceEstimate.all.sort_by(&:id).map(&:estimate_of)
+
+      actual = PriceEstimate.where.yield_self do |where_chain|
+        where_chain.stub(:not_behaves_as_nor?, false) do
+          where_chain.not(estimate_of_type: sapphire.class.polymorphic_name, estimate_of_id: sapphire.id)
+        end
+      end
+      only = PriceEstimate.where(estimate_of_type: sapphire.class.polymorphic_name, estimate_of_id: sapphire.id)
+
+      expected = all - [sapphire]
+      assert_equal expected, actual.sort_by(&:id).map(&:estimate_of)
+      assert_equal all - expected, only.sort_by(&:id).map(&:estimate_of)
+    end
+
+    def test_where_not_polymorphic_id_and_type_as_nor_is_deprecated
+      sapphire = treasures(:sapphire)
+
+      all = [treasures(:diamond), sapphire, cars(:honda), sapphire]
+      assert_equal all, PriceEstimate.all.sort_by(&:id).map(&:estimate_of)
+
+      message = <<~MSG.squish
+        NOT conditions will no longer behave as NOR in Rails 6.1.
+        To continue using NOR conditions, NOT each condition individually
+        (`.where.not(:estimate_of_type => ...).where.not(:estimate_of_id => ...)`).
+      MSG
+      actual = assert_deprecated(message) do
+        PriceEstimate.where.not(estimate_of_type: sapphire.class.polymorphic_name, estimate_of_id: sapphire.id)
+      end
+      only = PriceEstimate.where(estimate_of_type: sapphire.class.polymorphic_name, estimate_of_id: sapphire.id)
+
+      expected = all - [sapphire]
+      # NOT (estimate_of_type = 'Treasure' OR estimate_of_id = sapphire.id) matches only `cars(:honda)` unfortunately.
+      assert_not_equal expected, actual.sort_by(&:id).map(&:estimate_of)
+      assert_equal all - expected, only.sort_by(&:id).map(&:estimate_of)
+    end
+
+    def test_where_not_association_as_nor_is_deprecated
+      treasure = Treasure.create!(name: "my_treasure")
+      PriceEstimate.create!(estimate_of: treasure, price: 2, currency: "USD")
+      PriceEstimate.create!(estimate_of: treasure, price: 2, currency: "EUR")
+
+      message = <<~MSG.squish
+        NOT conditions will no longer behave as NOR in Rails 6.1.
+        To continue using NOR conditions, NOT each condition individually
+        (`.where.not(:price_estimates => { :price => ... }).where.not(:price_estimates => { :currency => ... })`).
+      MSG
+      assert_deprecated(message) do
+        result = Treasure.joins(:price_estimates).where.not(price_estimates: { price: 2, currency: "USD" })
+
+        assert_predicate result, :empty?
+      end
     end
 
     def test_polymorphic_nested_array_where
@@ -332,7 +406,6 @@ module ActiveRecord
       author_address = AuthorAddress.where(author: Author.where(id: author.id)).first
       assert_equal author_addresses(:david_address), author_address
     end
-
 
     def test_where_on_association_with_select_relation
       essay = Essay.where(author: Author.where(name: "David").select(:name)).take

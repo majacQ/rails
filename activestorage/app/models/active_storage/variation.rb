@@ -40,7 +40,7 @@ class ActiveStorage::Variation
   end
 
   def initialize(transformations)
-    @transformations = transformations
+    @transformations = transformations.deep_symbolize_keys
   end
 
   # Accepts a File object, performs the +transformations+ against it, and
@@ -56,6 +56,10 @@ class ActiveStorage::Variation
   # Returns a signed key for all the +transformations+ that this variation was instantiated with.
   def key
     self.class.encode(transformations)
+  end
+
+  def digest
+    Digest::SHA1.base64digest Marshal.dump(transformations)
   end
 
   private

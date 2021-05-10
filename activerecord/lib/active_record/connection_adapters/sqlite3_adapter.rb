@@ -4,12 +4,13 @@ require "active_record/connection_adapters/abstract_adapter"
 require "active_record/connection_adapters/statement_pool"
 require "active_record/connection_adapters/sqlite3/explain_pretty_printer"
 require "active_record/connection_adapters/sqlite3/quoting"
+require "active_record/connection_adapters/sqlite3/database_statements"
 require "active_record/connection_adapters/sqlite3/schema_creation"
 require "active_record/connection_adapters/sqlite3/schema_definitions"
 require "active_record/connection_adapters/sqlite3/schema_dumper"
 require "active_record/connection_adapters/sqlite3/schema_statements"
 
-gem "sqlite3", "~> 1.3", ">= 1.3.6"
+gem "sqlite3", "~> 1.4"
 require "sqlite3"
 
 module ActiveRecord
@@ -25,7 +26,7 @@ module ActiveRecord
       # Allow database path relative to Rails.root, but only if the database
       # path is not the special path that tells sqlite to build a database only
       # in memory.
-      if ":memory:" != config[:database]
+      if ":memory:" != config[:database] && !config[:database].to_s.starts_with?("file:")
         config[:database] = File.expand_path(config[:database], Rails.root) if defined?(Rails.root)
         dirname = File.dirname(config[:database])
         Dir.mkdir(dirname) unless File.directory?(dirname)
@@ -47,8 +48,8 @@ module ActiveRecord
   end
 
   module ConnectionAdapters #:nodoc:
-    # The SQLite3 adapter works SQLite 3.6.16 or newer
-    # with the sqlite3-ruby drivers (available as gem from https://rubygems.org/gems/sqlite3).
+    # The SQLite3 adapter works with the sqlite3-ruby drivers
+    # (available as gem from https://rubygems.org/gems/sqlite3).
     #
     # Options:
     #
@@ -58,6 +59,7 @@ module ActiveRecord
 
       include SQLite3::Quoting
       include SQLite3::SchemaStatements
+      include SQLite3::DatabaseStatements
 
       NATIVE_DATABASE_TYPES = {
         primary_key:  "integer PRIMARY KEY AUTOINCREMENT NOT NULL",
@@ -96,6 +98,16 @@ module ActiveRecord
         configure_connection
       end
 
+      def self.database_exists?(config)
+        config = config.symbolize_keys
+        if config[:database] == ":memory:"
+          true
+        else
+          database_file = defined?(Rails.root) ? File.expand_path(config[:database], Rails.root) : config[:database]
+          File.exist?(database_file)
+        end
+      end
+
       def supports_ddl_transactions?
         true
       end
@@ -104,12 +116,16 @@ module ActiveRecord
         true
       end
 
+      def supports_transaction_isolation?
+        true
+      end
+
       def supports_partial_index?
         true
       end
 
       def supports_expression_index?
-        sqlite_version >= "3.9.0"
+        database_version >= "3.9.0"
       end
 
       def requires_reloading?
@@ -132,8 +148,12 @@ module ActiveRecord
         true
       end
 
+      def supports_common_table_expressions?
+        database_version >= "3.8.3"
+      end
+
       def supports_insert_on_conflict?
-        sqlite_version >= "3.24.0"
+        database_version >= "3.24.0"
       end
       alias supports_insert_on_duplicate_skip? supports_insert_on_conflict?
       alias supports_insert_on_duplicate_update? supports_insert_on_conflict?
@@ -153,10 +173,6 @@ module ActiveRecord
       def disconnect!
         super
         @connection.close rescue nil
-      end
-
-      def truncate(table_name, name = nil)
-        execute "DELETE FROM #{quote_table_name(table_name)}", name
       end
 
       def supports_index_sort_order?
@@ -203,94 +219,6 @@ module ActiveRecord
         end
       end
 
-      #--
-      # DATABASE STATEMENTS ======================================
-      #++
-
-      READ_QUERY = ActiveRecord::ConnectionAdapters::AbstractAdapter.build_read_query_regexp(:begin, :commit, :explain, :select, :pragma, :release, :savepoint, :rollback) # :nodoc:
-      private_constant :READ_QUERY
-
-      def write_query?(sql) # :nodoc:
-        !READ_QUERY.match?(sql)
-      end
-
-      def explain(arel, binds = [])
-        sql = "EXPLAIN QUERY PLAN #{to_sql(arel, binds)}"
-        SQLite3::ExplainPrettyPrinter.new.pp(exec_query(sql, "EXPLAIN", []))
-      end
-
-      def exec_query(sql, name = nil, binds = [], prepare: false)
-        if preventing_writes? && write_query?(sql)
-          raise ActiveRecord::ReadOnlyError, "Write query attempted while in readonly mode: #{sql}"
-        end
-
-        materialize_transactions
-
-        type_casted_binds = type_casted_binds(binds)
-
-        log(sql, name, binds, type_casted_binds) do
-          ActiveSupport::Dependencies.interlock.permit_concurrent_loads do
-            # Don't cache statements if they are not prepared
-            unless prepare
-              stmt = @connection.prepare(sql)
-              begin
-                cols = stmt.columns
-                unless without_prepared_statement?(binds)
-                  stmt.bind_params(type_casted_binds)
-                end
-                records = stmt.to_a
-              ensure
-                stmt.close
-              end
-            else
-              stmt = @statements[sql] ||= @connection.prepare(sql)
-              cols = stmt.columns
-              stmt.reset!
-              stmt.bind_params(type_casted_binds)
-              records = stmt.to_a
-            end
-
-            ActiveRecord::Result.new(cols, records)
-          end
-        end
-      end
-
-      def exec_delete(sql, name = "SQL", binds = [])
-        exec_query(sql, name, binds)
-        @connection.changes
-      end
-      alias :exec_update :exec_delete
-
-      def last_inserted_id(result)
-        @connection.last_insert_row_id
-      end
-
-      def execute(sql, name = nil) #:nodoc:
-        if preventing_writes? && write_query?(sql)
-          raise ActiveRecord::ReadOnlyError, "Write query attempted while in readonly mode: #{sql}"
-        end
-
-        materialize_transactions
-
-        log(sql, name) do
-          ActiveSupport::Dependencies.interlock.permit_concurrent_loads do
-            @connection.execute(sql)
-          end
-        end
-      end
-
-      def begin_db_transaction #:nodoc:
-        log("begin transaction", nil) { @connection.transaction }
-      end
-
-      def commit_db_transaction #:nodoc:
-        log("commit transaction", nil) { @connection.commit }
-      end
-
-      def exec_rollback_db_transaction #:nodoc:
-        log("rollback transaction", nil) { @connection.rollback }
-      end
-
       # SCHEMA STATEMENTS ========================================
 
       def primary_keys(table_name) # :nodoc:
@@ -298,8 +226,8 @@ module ActiveRecord
         pks.sort_by { |f| f["pk"] }.map { |f| f["name"] }
       end
 
-      def remove_index(table_name, options = {}) #:nodoc:
-        index_name = index_name_for_remove(table_name, options)
+      def remove_index(table_name, column_name, options = {}) #:nodoc:
+        index_name = index_name_for_remove(table_name, column_name, options)
         exec_query "DROP INDEX #{quote_column_name(index_name)}"
       end
 
@@ -308,21 +236,23 @@ module ActiveRecord
       # Example:
       #   rename_table('octopuses', 'octopi')
       def rename_table(table_name, new_name)
+        schema_cache.clear_data_source_cache!(table_name.to_s)
+        schema_cache.clear_data_source_cache!(new_name.to_s)
         exec_query "ALTER TABLE #{quote_table_name(table_name)} RENAME TO #{quote_table_name(new_name)}"
         rename_table_indexes(table_name, new_name)
       end
 
-      def add_column(table_name, column_name, type, options = {}) #:nodoc:
+      def add_column(table_name, column_name, type, **options) #:nodoc:
         if invalid_alter_table_type?(type, options)
           alter_table(table_name) do |definition|
-            definition.column(column_name, type, options)
+            definition.column(column_name, type, **options)
           end
         else
           super
         end
       end
 
-      def remove_column(table_name, column_name, type = nil, options = {}) #:nodoc:
+      def remove_column(table_name, column_name, type = nil, **options) #:nodoc:
         alter_table(table_name) do |definition|
           definition.remove_column column_name
           definition.foreign_keys.delete_if do |_, fk_options|
@@ -386,18 +316,6 @@ module ActiveRecord
         end
       end
 
-      def insert_fixtures_set(fixture_set, tables_to_delete = [])
-        disable_referential_integrity do
-          transaction(requires_new: true) do
-            tables_to_delete.each { |table| delete "DELETE FROM #{quote_table_name(table)}", "Fixture Delete" }
-
-            fixture_set.each do |table_name, rows|
-              rows.each { |row| insert_fixture(row, table_name) }
-            end
-          end
-        end
-      end
-
       def build_insert_sql(insert) # :nodoc:
         sql = +"INSERT #{insert.into} #{insert.values_list}"
 
@@ -405,10 +323,25 @@ module ActiveRecord
           sql << " ON CONFLICT #{insert.conflict_target} DO NOTHING"
         elsif insert.update_duplicates?
           sql << " ON CONFLICT #{insert.conflict_target} DO UPDATE SET "
+          sql << insert.touch_model_timestamps_unless { |column| "#{column} IS excluded.#{column}" }
           sql << insert.updatable_columns.map { |column| "#{column}=excluded.#{column}" }.join(",")
         end
 
         sql
+      end
+
+      def shared_cache? # :nodoc:
+        @config.fetch(:flags, 0).anybits?(::SQLite3::Constants::Open::SHAREDCACHE)
+      end
+
+      def get_database_version # :nodoc:
+        SQLite3Adapter::Version.new(query_value("SELECT sqlite_version(*)"))
+      end
+
+      def check_version # :nodoc:
+        if database_version < "3.8.0"
+          raise "Your version of SQLite (#{database_version}) is too old. Active Record supports SQLite >= 3.8."
+        end
       end
 
       private
@@ -416,12 +349,6 @@ module ActiveRecord
         # the default value is 999 when not configured.
         def bind_params_length
           999
-        end
-
-        def check_version
-          if sqlite_version < "3.8.0"
-            raise "Your version of SQLite (#{sqlite_version}) is too old. Active Record supports SQLite >= 3.8."
-          end
         end
 
         def initialize_type_map(m = type_map)
@@ -439,7 +366,8 @@ module ActiveRecord
         # See: https://www.sqlite.org/lang_altertable.html
         # SQLite has an additional restriction on the ALTER TABLE statement
         def invalid_alter_table_type?(type, options)
-          type.to_sym == :primary_key || options[:primary_key]
+          type.to_sym == :primary_key || options[:primary_key] ||
+            options[:null] == false && options[:default].nil?
         end
 
         def alter_table(table_name, foreign_keys = foreign_keys(table_name), **options)
@@ -452,7 +380,7 @@ module ActiveRecord
                 fk.options[:column] = column
               end
               to_table = strip_table_name_prefix_and_suffix(fk.to_table)
-              definition.foreign_key(to_table, fk.options)
+              definition.foreign_key(to_table, **fk.options)
             end
 
             yield definition if block_given?
@@ -474,11 +402,12 @@ module ActiveRecord
         def copy_table(from, to, options = {})
           from_primary_key = primary_key(from)
           options[:id] = false
-          create_table(to, options) do |definition|
+          create_table(to, **options) do |definition|
             @definition = definition
             if from_primary_key.is_a?(Array)
               @definition.primary_keys from_primary_key
             end
+
             columns(from).each do |column|
               column_name = options[:rename] ?
                 (options[:rename][column.name] ||
@@ -541,10 +470,6 @@ module ActiveRecord
                      SELECT #{quoted_from_columns} FROM #{quote_table_name(from)}")
         end
 
-        def sqlite_version
-          @sqlite_version ||= SQLite3Adapter::Version.new(query_value("SELECT sqlite_version(*)"))
-        end
-
         def translate_exception(exception, message:, sql:, binds:)
           case exception.message
           # SQLite 3.8.2 returns a newly formatted error message:
@@ -579,9 +504,9 @@ module ActiveRecord
           result = exec_query(sql, "SCHEMA").first
 
           if result
-            # Splitting with left parentheses and picking up last will return all
+            # Splitting with left parentheses and discarding the first part will return all
             # columns separated with comma(,).
-            columns_string = result["sql"].split("(").last
+            columns_string = result["sql"].split("(", 2).last
 
             columns_string.split(",").each do |column_string|
               # This regex will match the column name and collation type and will save

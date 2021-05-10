@@ -41,8 +41,8 @@ Major Features
 [Pull Request](https://github.com/rails/rails/pull/26836)
 
 Rails 5.1 allows managing JavaScript dependencies
-from NPM via Yarn. This will make it easy to use libraries like React, VueJS
-or any other library from NPM world. The Yarn support is integrated with
+from npm via Yarn. This will make it easy to use libraries like React, VueJS
+or any other library from npm world. The Yarn support is integrated with
 the asset pipeline so that all dependencies will work seamlessly with the
 Rails 5.1 app.
 
@@ -89,7 +89,7 @@ screenshots.
 Rails now allows management of application secrets in a secure way,
 inspired by the [sekrets](https://github.com/ahoward/sekrets) gem.
 
-Run `bin/rails secrets:setup` to setup a new encrypted secrets file. This will
+Run `bin/rails secrets:setup` to set up a new encrypted secrets file. This will
 also generate a master key, which must be stored outside of the repository. The
 secrets themselves can then be safely checked into the revision control system,
 in an encrypted form.

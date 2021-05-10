@@ -101,7 +101,7 @@ NOTE: `belongs_to` associations _must_ use the singular term. If you used the pl
 The corresponding migration might look like this:
 
 ```ruby
-class CreateBooks < ActiveRecord::Migration[5.0]
+class CreateBooks < ActiveRecord::Migration[6.0]
   def change
     create_table :authors do |t|
       t.string :name
@@ -132,7 +132,7 @@ end
 The corresponding migration might look like this:
 
 ```ruby
-class CreateSuppliers < ActiveRecord::Migration[5.0]
+class CreateSuppliers < ActiveRecord::Migration[6.0]
   def change
     create_table :suppliers do |t|
       t.string :name
@@ -176,7 +176,7 @@ NOTE: The name of the other model is pluralized when declaring a `has_many` asso
 The corresponding migration might look like this:
 
 ```ruby
-class CreateAuthors < ActiveRecord::Migration[5.0]
+class CreateAuthors < ActiveRecord::Migration[6.0]
   def change
     create_table :authors do |t|
       t.string :name
@@ -218,7 +218,7 @@ end
 The corresponding migration might look like this:
 
 ```ruby
-class CreateAppointments < ActiveRecord::Migration[5.0]
+class CreateAppointments < ActiveRecord::Migration[6.0]
   def change
     create_table :physicians do |t|
       t.string :name
@@ -304,7 +304,7 @@ end
 The corresponding migration might look like this:
 
 ```ruby
-class CreateAccountHistories < ActiveRecord::Migration[5.0]
+class CreateAccountHistories < ActiveRecord::Migration[6.0]
   def change
     create_table :suppliers do |t|
       t.string :name
@@ -345,7 +345,7 @@ end
 The corresponding migration might look like this:
 
 ```ruby
-class CreateAssembliesAndParts < ActiveRecord::Migration[5.0]
+class CreateAssembliesAndParts < ActiveRecord::Migration[6.0]
   def change
     create_table :assemblies do |t|
       t.string :name
@@ -384,7 +384,7 @@ end
 The corresponding migration might look like this:
 
 ```ruby
-class CreateSuppliers < ActiveRecord::Migration[5.0]
+class CreateSuppliers < ActiveRecord::Migration[6.0]
   def change
     create_table :suppliers do |t|
       t.string :name
@@ -392,7 +392,7 @@ class CreateSuppliers < ActiveRecord::Migration[5.0]
     end
 
     create_table :accounts do |t|
-      t.integer :supplier_id
+      t.bigint  :supplier_id
       t.string  :account_number
       t.timestamps
     end
@@ -402,11 +402,11 @@ class CreateSuppliers < ActiveRecord::Migration[5.0]
 end
 ```
 
-NOTE: Using `t.integer :supplier_id` makes the foreign key naming obvious and explicit. In current versions of Rails, you can abstract away this implementation detail by using `t.references :supplier` instead.
+NOTE: Using `t.bigint :supplier_id` makes the foreign key naming obvious and explicit. In current versions of Rails, you can abstract away this implementation detail by using `t.references :supplier` instead.
 
 ### Choosing Between `has_many :through` and `has_and_belongs_to_many`
 
-Rails offers two different ways to declare a many-to-many relationship between models. The simpler way is to use `has_and_belongs_to_many`, which allows you to make the association directly:
+Rails offers two different ways to declare a many-to-many relationship between models. The first way is to use `has_and_belongs_to_many`, which allows you to make the association directly:
 
 ```ruby
 class Assembly < ApplicationRecord
@@ -466,11 +466,11 @@ Similarly, you can retrieve `@product.pictures`.
 If you have an instance of the `Picture` model, you can get to its parent via `@picture.imageable`. To make this work, you need to declare both a foreign key column and a type column in the model that declares the polymorphic interface:
 
 ```ruby
-class CreatePictures < ActiveRecord::Migration[5.0]
+class CreatePictures < ActiveRecord::Migration[6.0]
   def change
     create_table :pictures do |t|
       t.string  :name
-      t.integer :imageable_id
+      t.bigint  :imageable_id
       t.string  :imageable_type
       t.timestamps
     end
@@ -483,7 +483,7 @@ end
 This migration can be simplified by using the `t.references` form:
 
 ```ruby
-class CreatePictures < ActiveRecord::Migration[5.0]
+class CreatePictures < ActiveRecord::Migration[6.0]
   def change
     create_table :pictures do |t|
       t.string :name
@@ -514,7 +514,7 @@ With this setup, you can retrieve `@employee.subordinates` and `@employee.manage
 In your migrations/schema, you will add a references column to the model itself.
 
 ```ruby
-class CreateEmployees < ActiveRecord::Migration[5.0]
+class CreateEmployees < ActiveRecord::Migration[6.0]
   def change
     create_table :employees do |t|
       t.references :manager
@@ -575,7 +575,7 @@ end
 This declaration needs to be backed up by a corresponding foreign key column in the books table. For a brand new table, the migration might look something like this:
 
 ```ruby
-class CreateBooks < ActiveRecord::Migration[5.0]
+class CreateBooks < ActiveRecord::Migration[6.0]
   def change
     create_table :books do |t|
       t.datetime   :published_at
@@ -589,7 +589,7 @@ end
 Whereas for an existing table, it might look like this:
 
 ```ruby
-class AddAuthorToBooks < ActiveRecord::Migration[5.0]
+class AddAuthorToBooks < ActiveRecord::Migration[6.0]
   def change
     add_reference :books, :author
   end
@@ -619,11 +619,11 @@ end
 These need to be backed up by a migration to create the `assemblies_parts` table. This table should be created without a primary key:
 
 ```ruby
-class CreateAssembliesPartsJoinTable < ActiveRecord::Migration[5.0]
+class CreateAssembliesPartsJoinTable < ActiveRecord::Migration[6.0]
   def change
     create_table :assemblies_parts, id: false do |t|
-      t.integer :assembly_id
-      t.integer :part_id
+      t.bigint :assembly_id
+      t.bigint :part_id
     end
 
     add_index :assemblies_parts, :assembly_id
@@ -637,7 +637,7 @@ We pass `id: false` to `create_table` because that table does not represent a mo
 You can also use the method `create_join_table`
 
 ```ruby
-class CreateAssembliesPartsJoinTable < ActiveRecord::Migration[5.0]
+class CreateAssembliesPartsJoinTable < ActiveRecord::Migration[6.0]
   def change
     create_join_table :assemblies, :parts do |t|
       t.index :assembly_id
@@ -1231,6 +1231,7 @@ The `has_one` association supports these options:
 * `:source`
 * `:source_type`
 * `:through`
+* `:touch`
 * `:validate`
 
 ##### `:as`
@@ -1305,9 +1306,46 @@ The `:source` option specifies the source association name for a `has_one :throu
 
 The `:source_type` option specifies the source association type for a `has_one :through` association that proceeds through a polymorphic association.
 
+```ruby
+class Book < ApplicationRecord
+  has_one :format, polymorphic: true
+  has_one :dust_jacket, through: :format, source: :dust_jacket, source_type: "Hardback"
+end
+
+class Paperback < ApplicationRecord; end
+
+class Hardback < ApplicationRecord
+  has_one :dust_jacket
+end
+
+class DustJacket < ApplicationRecord; end
+```
+
 ##### `:through`
 
 The `:through` option specifies a join model through which to perform the query. `has_one :through` associations were discussed in detail [earlier in this guide](#the-has-one-through-association).
+
+##### `:touch`
+
+If you set the `:touch` option to `true`, then the `updated_at` or `updated_on` timestamp on the associated object will be set to the current time whenever this object is saved or destroyed:
+
+```ruby
+class Supplier < ApplicationRecord
+  has_one :account, touch: true
+end
+
+class Account < ApplicationRecord
+  belongs_to :supplier
+end
+```
+
+In this case, saving or destroying a supplier will update the timestamp on the associated account. You can also specify a particular timestamp attribute to update:
+
+```ruby
+class Supplier < ApplicationRecord
+  has_one :account, touch: :suppliers_updated_at
+end
+```
 
 ##### `:validate`
 
@@ -1716,6 +1754,20 @@ The `:source` option specifies the source association name for a `has_many :thro
 ##### `:source_type`
 
 The `:source_type` option specifies the source association type for a `has_many :through` association that proceeds through a polymorphic association.
+
+```ruby
+class Author < ApplicationRecord
+  has_many :books
+  has_many :paperbacks, through: :books, source: :format, source_type: "Paperback"
+end
+
+class Book < ApplicationRecord
+  has_one :format, polymorphic: true
+end
+
+class Hardback < ApplicationRecord; end
+class Paperback < ApplicationRecord; end
+```
 
 ##### `:through`
 
@@ -2354,11 +2406,11 @@ NOTE: These callbacks are called only when the associated objects are added or r
 
 ```ruby
 # Triggers `before_add` callback
-author.books << book    
+author.books << book
 author.books = [book, book2]
 
 # Does not trigger the `before_add` callback
-book.update(author_id: 1) 
+book.update(author_id: 1)
 ```
 
 ### Association Extensions
@@ -2399,18 +2451,18 @@ Extensions can refer to the internals of the association proxy using these three
 * `proxy_association.reflection` returns the reflection object that describes the association.
 * `proxy_association.target` returns the associated object for `belongs_to` or `has_one`, or the collection of associated objects for `has_many` or `has_and_belongs_to_many`.
 
-Single Table Inheritance
-------------------------
+Single Table Inheritance (STI)
+------------------------------
 
 Sometimes, you may want to share fields and behavior between different models.
 Let's say we have Car, Motorcycle, and Bicycle models. We will want to share
 the `color` and `price` fields and some methods for all of them, but having some
 specific behavior for each, and separated controllers too.
 
-Rails makes this quite easy. First, let's generate the base Vehicle model:
+First, let's generate the base Vehicle model:
 
 ```bash
-$ rails generate model vehicle type:string color:string price:decimal{10.2}
+$ bin/rails generate model vehicle type:string color:string price:decimal{10.2}
 ```
 
 Did you note we are adding a "type" field? Since all models will be saved in a
@@ -2426,7 +2478,7 @@ table already exists).
 For example, to generate the Car model:
 
 ```bash
-$ rails generate model car --parent=Vehicle
+$ bin/rails generate model car --parent=Vehicle
 ```
 
 The generated model will look like this:
@@ -2451,7 +2503,7 @@ will generate the following SQL:
 INSERT INTO "vehicles" ("type", "color", "price") VALUES ('Car', 'Red', 10000)
 ```
 
-Querying car records will just search for vehicles that are cars:
+Querying car records will search only for vehicles that are cars:
 
 ```ruby
 Car.all

@@ -30,6 +30,8 @@ module ActiveSupport
       #   end
       def assert_nothing_raised
         yield
+      rescue => error
+        raise Minitest::UnexpectedError.new(error)
       end
 
       # Test numeric difference between the return value of an expression as a
@@ -95,7 +97,7 @@ module ActiveSupport
         }
         before = exps.map(&:call)
 
-        retval = yield
+        retval = assert_nothing_raised(&block)
 
         expressions.zip(exps, before) do |(code, diff), exp, before_value|
           error  = "#{code.inspect} didn't change by #{diff}"
@@ -172,10 +174,10 @@ module ActiveSupport
         exp = expression.respond_to?(:call) ? expression : -> { eval(expression.to_s, block.binding) }
 
         before = exp.call
-        retval = yield
+        retval = assert_nothing_raised(&block)
 
         unless from == UNTRACKED
-          error = "#{expression.inspect} isn't #{from.inspect}"
+          error = "Expected change from #{from.inspect}"
           error = "#{message}.\n#{error}" if message
           assert from === before, error
         end
@@ -185,12 +187,10 @@ module ActiveSupport
         error = "#{expression.inspect} didn't change"
         error = "#{error}. It was already #{to}" if before == to
         error = "#{message}.\n#{error}" if message
-        assert before != after, error
+        assert_not_equal before, after, error
 
         unless to == UNTRACKED
-          error = "#{expression.inspect} didn't change to as expected\n"
-          error = "#{error}Expected: #{to.inspect}\n"
-          error = "#{error}  Actual: #{after.inspect}"
+          error = "Expected change to #{to}\n"
           error = "#{message}.\n#{error}" if message
           assert to === after, error
         end
@@ -214,12 +214,17 @@ module ActiveSupport
         exp = expression.respond_to?(:call) ? expression : -> { eval(expression.to_s, block.binding) }
 
         before = exp.call
-        retval = yield
+        retval = assert_nothing_raised(&block)
         after = exp.call
 
-        error = "#{expression.inspect} did change to #{after}"
+        error = "#{expression.inspect} changed"
         error = "#{message}.\n#{error}" if message
-        assert before == after, error
+
+        if before.nil?
+          assert_nil after, error
+        else
+          assert_equal before, after, error
+        end
 
         retval
       end

@@ -6,6 +6,7 @@ require "rails"
 require "active_support/deprecation"
 require "active_support/core_ext/string/filters"
 require "rails/dev_caching"
+require "rails/command/environment_argument"
 
 module Rails
   class Server < ::Rack::Server
@@ -91,12 +92,14 @@ module Rails
 
   module Command
     class ServerCommand < Base # :nodoc:
+      include EnvironmentArgument
+
       # Hard-coding a bunch of handlers here as we don't have a public way of
       # querying them from the Rack::Handler registry.
-      RACK_SERVERS = %w(cgi fastcgi webrick lsws scgi thin puma unicorn)
+      RACK_SERVERS = %w(cgi fastcgi webrick lsws scgi thin puma unicorn falcon)
 
       DEFAULT_PORT = 3000
-      DEFAULT_PID_PATH = "tmp/pids/server.pid"
+      DEFAULT_PIDFILE = "tmp/pids/server.pid"
 
       argument :using, optional: true
 
@@ -109,12 +112,10 @@ module Rails
         desc: "Uses a custom rackup configuration.", banner: :file
       class_option :daemon, aliases: "-d", type: :boolean, default: false,
         desc: "Runs server as a Daemon."
-      class_option :environment, aliases: "-e", type: :string,
-        desc: "Specifies the environment to run this server under (development/test/production).", banner: :name
       class_option :using, aliases: "-u", type: :string,
         desc: "Specifies the Rack server used to run the application (thin/puma/webrick).", banner: :name
-      class_option :pid, aliases: "-P", type: :string, default: DEFAULT_PID_PATH,
-        desc: "Specifies the PID file."
+      class_option :pid, aliases: "-P", type: :string,
+        desc: "Specifies the PID file - defaults to #{DEFAULT_PIDFILE}."
       class_option :dev_caching, aliases: "-C", type: :boolean, default: nil,
         desc: "Specifies whether to perform caching in development."
       class_option :restart, type: :boolean, default: nil, hide: true
@@ -130,6 +131,7 @@ module Rails
       end
 
       def perform
+        extract_environment_option_from_argument
         set_application_directory!
         prepare_restart
 
@@ -205,6 +207,7 @@ module Rails
             end
             user_supplied_options << :Host if ENV["HOST"] || ENV["BINDING"]
             user_supplied_options << :Port if ENV["PORT"]
+            user_supplied_options << :pid if ENV["PIDFILE"]
             user_supplied_options.uniq
           end
         end
@@ -251,7 +254,7 @@ module Rails
         end
 
         def pid
-          File.expand_path(options[:pid])
+          File.expand_path(options[:pid] || ENV.fetch("PIDFILE", DEFAULT_PIDFILE))
         end
 
         def self.banner(*)
@@ -259,7 +262,7 @@ module Rails
         end
 
         def prepare_restart
-          FileUtils.rm_f(options[:pid]) if options[:restart]
+          FileUtils.rm_f(pid) if options[:restart]
         end
 
         def deprecate_positional_rack_server_and_rewrite_to_option(original_options)
@@ -285,7 +288,7 @@ module Rails
 
                 gem "#{server}"
 
-              Run `rails server --help` for more options.
+              Run `bin/rails server --help` for more options.
             MSG
           else
             suggestion = Rails::Command::Spellchecker.suggest(server, from: RACK_SERVERS)
@@ -293,7 +296,7 @@ module Rails
 
             <<~MSG
               Could not find server "#{server}". #{suggestion_msg}
-              Run `rails server --help` for more options.
+              Run `bin/rails server --help` for more options.
             MSG
           end
         end
@@ -302,7 +305,7 @@ module Rails
           say <<~MSG
             => Booting #{ActiveSupport::Inflector.demodulize(server)}
             => Rails #{Rails.version} application starting in #{Rails.env} #{url}
-            => Run `rails server --help` for more startup options
+            => Run `bin/rails server --help` for more startup options
           MSG
         end
     end

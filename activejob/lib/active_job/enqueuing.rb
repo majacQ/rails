@@ -21,11 +21,13 @@ module ActiveJob
       def perform_later(*args)
         job_or_instantiate(*args).enqueue
       end
+      ruby2_keywords(:perform_later) if respond_to?(:ruby2_keywords, true)
 
       private
         def job_or_instantiate(*args) # :doc:
           args.first.is_a?(self) ? args.first : new(*args)
         end
+        ruby2_keywords(:job_or_instantiate) if respond_to?(:ruby2_keywords, true)
     end
 
     # Enqueues the job to be performed by the queue adapter.
@@ -52,9 +54,9 @@ module ActiveJob
 
       run_callbacks :enqueue do
         if scheduled_at
-          self.class.queue_adapter.enqueue_at self, scheduled_at
+          queue_adapter.enqueue_at self, scheduled_at
         else
-          self.class.queue_adapter.enqueue self
+          queue_adapter.enqueue self
         end
 
         successfully_enqueued = true
@@ -63,11 +65,13 @@ module ActiveJob
       if successfully_enqueued
         self
       else
+        warn_against_after_callbacks_execution_deprecation(_enqueue_callbacks)
+
         if self.class.return_false_on_aborted_enqueue
           false
         else
           ActiveSupport::Deprecation.warn(
-            "Rails 6.0 will return false when the enqueuing is aborted. Make sure your code doesn't depend on it" \
+            "Rails 6.1 will return false when the enqueuing is aborted. Make sure your code doesn't depend on it" \
             " returning the instance of the job and set `config.active_job.return_false_on_aborted_enqueue = true`" \
             " to remove the deprecations."
           )

@@ -27,6 +27,10 @@ module ActiveSupport
           @queue << o
         end
 
+        def length
+          @queue.length
+        end
+
         def pop; @queue.pop; end
       end
 
@@ -68,10 +72,16 @@ module ActiveSupport
 
       def start
         @pool = @queue_size.times.map do |worker|
+          title = "Rails test worker #{worker}"
+
           fork do
+            Process.setproctitle("#{title} - (starting)")
+
             DRb.stop_service
 
-            after_fork(worker)
+            begin
+              after_fork(worker)
+            rescue => setup_exception; end
 
             queue = DRbObject.new_with_uri(@url)
 
@@ -79,18 +89,35 @@ module ActiveSupport
               klass    = job[0]
               method   = job[1]
               reporter = job[2]
-              result   = Minitest.run_one_method(klass, method)
+
+              Process.setproctitle("#{title} - #{klass}##{method}")
+
+              result = klass.with_info_handler reporter do
+                Minitest.run_one_method(klass, method)
+              end
+
+              add_setup_exception(result, setup_exception) if setup_exception
 
               begin
                 queue.record(reporter, result)
               rescue DRb::DRbConnError
-                result.failures.each do |failure|
-                  failure.exception = DRb::DRbRemoteError.new(failure.exception)
+                result.failures.map! do |failure|
+                  if failure.respond_to?(:error)
+                    # minitest >5.14.0
+                    error = DRb::DRbRemoteError.new(failure.error)
+                  else
+                    error = DRb::DRbRemoteError.new(failure.exception)
+                  end
+                  Minitest::UnexpectedError.new(error)
                 end
                 queue.record(reporter, result)
               end
+
+              Process.setproctitle("#{title} - (idle)")
             end
           ensure
+            Process.setproctitle("#{title} - (stopping)")
+
             run_cleanup(worker)
           end
         end
@@ -103,7 +130,16 @@ module ActiveSupport
       def shutdown
         @queue_size.times { @queue << nil }
         @pool.each { |pid| Process.waitpid pid }
+
+        if @queue.length > 0
+          raise "Queue not empty, but all workers have finished. This probably means that a worker crashed and #{@queue.length} tests were missed."
+        end
       end
+
+      private
+        def add_setup_exception(result, setup_exception)
+          result.failures.prepend Minitest::UnexpectedError.new(setup_exception)
+        end
     end
   end
 end

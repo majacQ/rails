@@ -38,6 +38,10 @@ module ActiveRecord
   class AdapterNotSpecified < ActiveRecordError
   end
 
+  # Raised when a model makes a query but it has not specified an associated table.
+  class TableNotSpecified < ActiveRecordError
+  end
+
   # Raised when Active Record cannot find database adapter specified in
   # +config/database.yml+ or programmatically.
   class AdapterNotFound < ActiveRecordError
@@ -102,7 +106,7 @@ module ActiveRecord
   # Wraps the underlying database error as +cause+.
   class StatementInvalid < ActiveRecordError
     def initialize(message = nil, sql: nil, binds: nil)
-      super(message || $!.try(:message))
+      super(message || $!&.message)
       @sql = sql
       @binds = binds
     end
@@ -183,6 +187,10 @@ module ActiveRecord
   class NoDatabaseError < StatementInvalid
   end
 
+  # Raised when creating a database if it exists.
+  class DatabaseAlreadyExists < StatementInvalid
+  end
+
   # Raised when PostgreSQL returns 'cached plan must not change result type' and
   # we cannot retry gracefully (e.g. inside a transaction)
   class PreparedStatementCacheExpired < StatementInvalid
@@ -218,6 +226,10 @@ module ActiveRecord
 
   # Raised on attempt to update record that is instantiated as read only.
   class ReadOnlyRecord < ActiveRecordError
+  end
+
+  # Raised on attempt to lazily load records that are marked as strict loading.
+  class StrictLoadingViolationError < ActiveRecordError
   end
 
   # {ActiveRecord::Base.transaction}[rdoc-ref:Transactions::ClassMethods#transaction]
@@ -330,7 +342,7 @@ module ActiveRecord
   # See the following:
   #
   # * https://www.postgresql.org/docs/current/static/transaction-iso.html
-  # * https://dev.mysql.com/doc/refman/5.7/en/error-messages-server.html#error_er_lock_deadlock
+  # * https://dev.mysql.com/doc/refman/en/server-error-reference.html#error_er_lock_deadlock
   class TransactionRollbackError < StatementInvalid
   end
 
@@ -349,16 +361,24 @@ module ActiveRecord
   class IrreversibleOrderError < ActiveRecordError
   end
 
+  # Superclass for errors that have been aborted (either by client or server).
+  class QueryAborted < StatementInvalid
+  end
+
   # LockWaitTimeout will be raised when lock wait timeout exceeded.
   class LockWaitTimeout < StatementInvalid
   end
 
   # StatementTimeout will be raised when statement timeout exceeded.
-  class StatementTimeout < StatementInvalid
+  class StatementTimeout < QueryAborted
   end
 
   # QueryCanceled will be raised when canceling statement due to user request.
-  class QueryCanceled < StatementInvalid
+  class QueryCanceled < QueryAborted
+  end
+
+  # AdapterTimeout will be raised when database clients times out while waiting from the server.
+  class AdapterTimeout < QueryAborted
   end
 
   # UnknownAttributeReference is raised when an unknown and potentially unsafe

@@ -45,7 +45,7 @@ prepareOptions = (options) ->
 
 createXHR = (options, done) ->
   xhr = new XMLHttpRequest()
-  # Open and setup xhr
+  # Open and set up xhr
   xhr.open(options.type, options.url, true)
   xhr.setRequestHeader('Accept', options.accept)
   # Set Content-Type only when sending a string
@@ -69,7 +69,7 @@ processResponse = (response, type) ->
       script.setAttribute('nonce', cspNonce())
       script.text = response
       document.head.appendChild(script).parentNode.removeChild(script)
-    else if type.match(/\bxml\b/)
+    else if type.match(/\b(xml|html|svg)\b/)
       parser = new DOMParser()
       type = type.replace(/;.+/, '') # remove something like ';charset=utf-8'
       try response = parser.parseFromString(response, type)

@@ -1,13 +1,18 @@
-## Rails 6.0.0.beta2 (February 25, 2019) ##
+*   Deprecate `Rails.application.credentials.action_mailbox.api_key` and `MAILGUN_INGRESS_API_KEY` in favor of `Rails.application.credentials.action_mailbox.signing_key` and `MAILGUN_INGRESS_SIGNING_KEY`.
 
-*   Allow skipping incineration of processed emails.
+    *Matthijs Vos*
 
-    This can be done by setting `config.action_mailbox.incinerate` to `false`.
+*   Allow easier creation of multi-part emails from the `create_inbound_email_from_mail` and `receive_inbound_email_from_mail` test helpers.
 
-    *Pratik Naik*
+    *Michael Herold*
 
-## Rails 6.0.0.beta1 (January 18, 2019) ##
+*   Fix Bcc header not being included with emails from `create_inbound_email_from` test helpers.
 
-*   Added to Rails.
+    *jduff*
 
-    *DHH*
+*   Add `ApplicationMailbox.mailbox_for` to expose mailbox routing.
+
+    *James Dabbs*
+
+
+Please check [6-0-stable](https://github.com/rails/rails/blob/6-0-stable/actionmailbox/CHANGELOG.md) for previous changes.

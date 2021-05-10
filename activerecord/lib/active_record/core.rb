@@ -43,9 +43,9 @@ module ActiveRecord
       #
       #   #<ActiveRecord::DatabaseConfigurations:0x00007fd1acbdf800 @configurations=[
       #     #<ActiveRecord::DatabaseConfigurations::HashConfig:0x00007fd1acbded10 @env_name="development",
-      #       @spec_name="primary", @config={"adapter"=>"sqlite3", "database"=>"db/development.sqlite3"}>,
+      #       @name="primary", @config={adapter: "sqlite3", database: "db/development.sqlite3"}>,
       #     #<ActiveRecord::DatabaseConfigurations::HashConfig:0x00007fd1acbdea90 @env_name="production",
-      #       @spec_name="primary", @config={"adapter"=>"mysql2", "database"=>"db/production.sqlite3"}>
+      #       @name="primary", @config={adapter: "sqlite3", database: "db/production.sqlite3"}>
       #   ]>
       def self.configurations=(config)
         @@configurations = ActiveRecord::DatabaseConfigurations.new(config)
@@ -101,7 +101,6 @@ module ActiveRecord
       # environment where dumping schema is rarely needed.
       mattr_accessor :dump_schema_after_migration, instance_writer: false, default: true
 
-      mattr_accessor :database_selector, instance_writer: false
       ##
       # :singleton-method:
       # Specifies which database schemas to dump when calling db:structure:dump.
@@ -121,7 +120,7 @@ module ActiveRecord
 
       mattr_accessor :maintain_test_schema, instance_accessor: false
 
-      mattr_accessor :belongs_to_required_by_default, instance_accessor: false
+      class_attribute :belongs_to_required_by_default, instance_accessor: false
 
       mattr_accessor :connection_handlers, instance_accessor: false, default: {}
 
@@ -129,19 +128,32 @@ module ActiveRecord
 
       mattr_accessor :reading_role, instance_accessor: false, default: :reading
 
+      mattr_accessor :has_many_inversing, instance_accessor: false, default: false
+
       class_attribute :default_connection_handler, instance_writer: false
+
+      class_attribute :default_pool_key, instance_writer: false
 
       self.filter_attributes = []
 
       def self.connection_handler
-        Thread.current.thread_variable_get("ar_connection_handler") || default_connection_handler
+        Thread.current.thread_variable_get(:ar_connection_handler) || default_connection_handler
       end
 
       def self.connection_handler=(handler)
-        Thread.current.thread_variable_set("ar_connection_handler", handler)
+        Thread.current.thread_variable_set(:ar_connection_handler, handler)
+      end
+
+      def self.current_pool_key
+        Thread.current.thread_variable_get(:ar_pool_key) || default_pool_key
+      end
+
+      def self.current_pool_key=(pool_key)
+        Thread.current.thread_variable_set(:ar_pool_key, pool_key)
       end
 
       self.default_connection_handler = ConnectionAdapters::ConnectionHandler.new
+      self.default_pool_key = :default
     end
 
     module ClassMethods
@@ -175,8 +187,7 @@ module ActiveRecord
 
         record = statement.execute([id], connection)&.first
         unless record
-          raise RecordNotFound.new("Couldn't find #{name} with '#{primary_key}'=#{id}",
-                                   name, primary_key, id)
+          raise RecordNotFound.new("Couldn't find #{name} with '#{key}'=#{id}", name, key, id)
         end
         record
       end
@@ -270,7 +281,8 @@ module ActiveRecord
       end
 
       def arel_attribute(name, table = arel_table) # :nodoc:
-        name = attribute_alias(name) if attribute_alias?(name)
+        name = name.to_s
+        name = attribute_aliases[name] || name
         table[name]
       end
 
@@ -287,7 +299,6 @@ module ActiveRecord
       end
 
       private
-
         def cached_find_by_statement(key, &block)
           cache = @find_by_statement_cache[connection.prepared_statements]
           cache.compute_if_absent(key) { StatementCache.create(connection, &block) }
@@ -318,7 +329,7 @@ module ActiveRecord
     #   # Instantiates a single new object
     #   User.new(first_name: 'Jamie')
     def initialize(attributes = nil)
-      self.class.define_attribute_methods
+      @new_record = true
       @attributes = self.class._default_attributes.deep_dup
 
       init_internals
@@ -355,12 +366,10 @@ module ActiveRecord
     # +attributes+ should be an attributes object, and unlike the
     # `initialize` method, no assignment calls are made per attribute.
     def init_with_attributes(attributes, new_record = false) # :nodoc:
-      init_internals
-
       @new_record = new_record
       @attributes = attributes
 
-      self.class.define_attribute_methods
+      init_internals
 
       yield self if block_given?
 
@@ -399,13 +408,13 @@ module ActiveRecord
     ##
     def initialize_dup(other) # :nodoc:
       @attributes = @attributes.deep_dup
-      @attributes.reset(self.class.primary_key)
+      @attributes.reset(@primary_key)
 
       _run_initialize_callbacks
 
       @new_record               = true
       @destroyed                = false
-      @_start_transaction_state = {}
+      @_start_transaction_state = nil
       @transaction_state        = nil
 
       super
@@ -466,6 +475,7 @@ module ActiveRecord
 
     # Returns +true+ if the attributes hash has been frozen.
     def frozen?
+      sync_with_transaction_state if @transaction_state&.finalized?
       @attributes.frozen?
     end
 
@@ -490,6 +500,14 @@ module ActiveRecord
     # attributes will be marked as read only since they cannot be saved.
     def readonly?
       @readonly
+    end
+
+    def strict_loading?
+      @strict_loading
+    end
+
+    def strict_loading!
+      @strict_loading = true
     end
 
     # Marks this record as read only.
@@ -556,7 +574,6 @@ module ActiveRecord
     end
 
     private
-
       # +Array#flatten+ will call +#to_ary+ (recursively) on each of the elements of
       # the array, and then rescues from the possible +NoMethodError+. If those elements are
       # +ActiveRecord::Base+'s, then this triggers the various +method_missing+'s that we have,
@@ -570,34 +587,35 @@ module ActiveRecord
       end
 
       def init_internals
+        @primary_key              = self.class.primary_key
         @readonly                 = false
         @destroyed                = false
         @marked_for_destruction   = false
         @destroyed_by_association = nil
-        @new_record               = true
-        @_start_transaction_state = {}
+        @_start_transaction_state = nil
         @transaction_state        = nil
+        @strict_loading           = false
+
+        self.class.define_attribute_methods
       end
 
       def initialize_internals_callback
-      end
-
-      def thaw
-        if frozen?
-          @attributes = @attributes.dup
-        end
       end
 
       def custom_inspect_method_defined?
         self.class.instance_method(:inspect).owner != ActiveRecord::Base.instance_method(:inspect).owner
       end
 
+      class InspectionMask < DelegateClass(::String)
+        def pretty_print(pp)
+          pp.text __getobj__
+        end
+      end
+      private_constant :InspectionMask
+
       def inspection_filter
         @inspection_filter ||= begin
-          mask = DelegateClass(::String).new(ActiveSupport::ParameterFilter::FILTERED)
-          def mask.pretty_print(pp)
-            pp.text __getobj__
-          end
+          mask = InspectionMask.new(ActiveSupport::ParameterFilter::FILTERED)
           ActiveSupport::ParameterFilter.new(self.class.filter_attributes, mask: mask)
         end
       end
