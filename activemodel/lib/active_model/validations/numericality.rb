@@ -1,100 +1,106 @@
 # frozen_string_literal: true
 
+require "active_model/validations/comparability"
+require "bigdecimal/util"
+
 module ActiveModel
   module Validations
     class NumericalityValidator < EachValidator # :nodoc:
-      CHECKS = { greater_than: :>, greater_than_or_equal_to: :>=,
-                 equal_to: :==, less_than: :<, less_than_or_equal_to: :<=,
-                 odd: :odd?, even: :even?, other_than: :!= }.freeze
+      include Comparability
 
-      RESERVED_OPTIONS = CHECKS.keys + [:only_integer]
+      RANGE_CHECKS = { in: :in? }
+      NUMBER_CHECKS = { odd: :odd?, even: :even? }
+
+      RESERVED_OPTIONS = COMPARE_CHECKS.keys + NUMBER_CHECKS.keys + RANGE_CHECKS.keys + [:only_integer]
+
+      INTEGER_REGEX = /\A[+-]?\d+\z/
+
+      HEXADECIMAL_REGEX = /\A[+-]?0[xX]/
 
       def check_validity!
-        keys = CHECKS.keys - [:odd, :even]
-        options.slice(*keys).each do |option, value|
+        options.slice(*COMPARE_CHECKS.keys).each do |option, value|
           unless value.is_a?(Numeric) || value.is_a?(Proc) || value.is_a?(Symbol)
             raise ArgumentError, ":#{option} must be a number, a symbol or a proc"
           end
         end
+
+        options.slice(*RANGE_CHECKS.keys).each do |option, value|
+          unless value.is_a?(Range)
+            raise ArgumentError, ":#{option} must be a range"
+          end
+        end
       end
 
-      def validate_each(record, attr_name, value)
-        came_from_user = :"#{attr_name}_came_from_user?"
-
-        if record.respond_to?(came_from_user)
-          if record.public_send(came_from_user)
-            raw_value = record.read_attribute_before_type_cast(attr_name)
-          elsif record.respond_to?(:read_attribute)
-            raw_value = record.read_attribute(attr_name)
-          end
-        else
-          before_type_cast = :"#{attr_name}_before_type_cast"
-          if record.respond_to?(before_type_cast)
-            raw_value = record.public_send(before_type_cast)
-          end
-        end
-        raw_value ||= value
-
-        if record_attribute_changed_in_place?(record, attr_name)
-          raw_value = value
-        end
-
-        unless is_number?(raw_value)
-          record.errors.add(attr_name, :not_a_number, filtered_options(raw_value))
+      def validate_each(record, attr_name, value, precision: Float::DIG, scale: nil)
+        unless is_number?(value, precision, scale)
+          record.errors.add(attr_name, :not_a_number, **filtered_options(value))
           return
         end
 
-        if allow_only_integer?(record) && !is_integer?(raw_value)
-          record.errors.add(attr_name, :not_an_integer, filtered_options(raw_value))
+        if allow_only_integer?(record) && !is_integer?(value)
+          record.errors.add(attr_name, :not_an_integer, **filtered_options(value))
           return
         end
 
-        if raw_value.is_a?(Numeric)
-          value = raw_value
-        else
-          value = parse_raw_value_as_a_number(raw_value)
-        end
+        value = parse_as_number(value, precision, scale)
 
-        options.slice(*CHECKS.keys).each do |option, option_value|
-          case option
-          when :odd, :even
-            unless value.to_i.send(CHECKS[option])
-              record.errors.add(attr_name, option, filtered_options(value))
+        options.slice(*RESERVED_OPTIONS).each do |option, option_value|
+          if NUMBER_CHECKS.include?(option)
+            unless value.to_i.public_send(NUMBER_CHECKS[option])
+              record.errors.add(attr_name, option, **filtered_options(value))
             end
-          else
-            case option_value
-            when Proc
-              option_value = option_value.call(record)
-            when Symbol
-              option_value = record.send(option_value)
+          elsif RANGE_CHECKS.include?(option)
+            unless value.public_send(RANGE_CHECKS[option], option_value)
+              record.errors.add(attr_name, option, **filtered_options(value).merge!(count: option_value))
             end
-
-            unless value.send(CHECKS[option], option_value)
-              record.errors.add(attr_name, option, filtered_options(value).merge!(count: option_value))
+          elsif COMPARE_CHECKS.include?(option)
+            option_value = option_as_number(record, option_value, precision, scale)
+            unless value.public_send(COMPARE_CHECKS[option], option_value)
+              record.errors.add(attr_name, option, **filtered_options(value).merge!(count: option_value))
             end
           end
         end
       end
 
     private
+      def option_as_number(record, option_value, precision, scale)
+        parse_as_number(option_value(record, option_value), precision, scale)
+      end
 
-      def is_number?(raw_value)
-        !parse_raw_value_as_a_number(raw_value).nil?
+      def parse_as_number(raw_value, precision, scale)
+        if raw_value.is_a?(Float)
+          parse_float(raw_value, precision, scale)
+        elsif raw_value.is_a?(BigDecimal)
+          round(raw_value, scale)
+        elsif raw_value.is_a?(Numeric)
+          raw_value
+        elsif is_integer?(raw_value)
+          raw_value.to_i
+        elsif !is_hexadecimal_literal?(raw_value)
+          parse_float(Kernel.Float(raw_value), precision, scale)
+        end
+      end
+
+      def parse_float(raw_value, precision, scale)
+        round(raw_value, scale).to_d(precision)
+      end
+
+      def round(raw_value, scale)
+        scale ? raw_value.round(scale) : raw_value
+      end
+
+      def is_number?(raw_value, precision, scale)
+        !parse_as_number(raw_value, precision, scale).nil?
       rescue ArgumentError, TypeError
         false
       end
 
-      def parse_raw_value_as_a_number(raw_value)
-        return raw_value.to_i if is_integer?(raw_value)
-        Kernel.Float(raw_value) unless is_hexadecimal_literal?(raw_value)
-      end
-
       def is_integer?(raw_value)
-        /\A[+-]?\d+\z/ === raw_value.to_s
+        INTEGER_REGEX.match?(raw_value.to_s)
       end
 
       def is_hexadecimal_literal?(raw_value)
-        /\A0[xX]/ === raw_value
+        HEXADECIMAL_REGEX.match?(raw_value.to_s)
       end
 
       def filtered_options(value)
@@ -114,6 +120,27 @@ module ActiveModel
         end
       end
 
+      def prepare_value_for_validation(value, record, attr_name)
+        return value if record_attribute_changed_in_place?(record, attr_name)
+
+        came_from_user = :"#{attr_name}_came_from_user?"
+
+        if record.respond_to?(came_from_user)
+          if record.public_send(came_from_user)
+            raw_value = record.public_send(:"#{attr_name}_before_type_cast")
+          elsif record.respond_to?(:read_attribute)
+            raw_value = record.read_attribute(attr_name)
+          end
+        else
+          before_type_cast = :"#{attr_name}_before_type_cast"
+          if record.respond_to?(before_type_cast)
+            raw_value = record.public_send(before_type_cast)
+          end
+        end
+
+        raw_value || value
+      end
+
       def record_attribute_changed_in_place?(record, attr_name)
         record.respond_to?(:attribute_changed_in_place?) &&
           record.attribute_changed_in_place?(attr_name.to_s)
@@ -124,7 +151,8 @@ module ActiveModel
       # Validates whether the value of the specified attribute is numeric by
       # trying to convert it to a float with Kernel.Float (if <tt>only_integer</tt>
       # is +false+) or applying it to the regular expression <tt>/\A[\+\-]?\d+\z/</tt>
-      # (if <tt>only_integer</tt> is set to +true+).
+      # (if <tt>only_integer</tt> is set to +true+). Precision of Kernel.Float values
+      # are guaranteed up to 15 digits.
       #
       #   class Person < ActiveRecord::Base
       #     validates_numericality_of :value, on: :create
@@ -151,6 +179,7 @@ module ActiveModel
       #   supplied value.
       # * <tt>:odd</tt> - Specifies the value must be an odd number.
       # * <tt>:even</tt> - Specifies the value must be an even number.
+      # * <tt>:in</tt> - Check that the value is within a range.
       #
       # There is also a list of default options supported by every validator:
       # +:if+, +:unless+, +:on+, +:allow_nil+, +:allow_blank+, and +:strict+ .
@@ -165,6 +194,7 @@ module ActiveModel
       # * <tt>:less_than</tt>
       # * <tt>:less_than_or_equal_to</tt>
       # * <tt>:only_integer</tt>
+      # * <tt>:other_than</tt>
       #
       # For example:
       #

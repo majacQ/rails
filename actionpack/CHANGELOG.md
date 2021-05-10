@@ -1,173 +1,94 @@
-*   Raise an error on root route naming conflicts.
+*   Add support for 'require-trusted-types-for' and 'trusted-types' headers.
 
-    Raises an ArgumentError when multiple root routes are defined in the
-    same context instead of assigning nil names to subsequent roots.
+    Fixes #42034
 
-    *Gannon McGibbon*
+    *lfalcao*
 
-*   Allow rescue from parameter parse errors:
+*   Remove inline styles and address basic accessibility issues on rescue templates.
 
-    ```
-    rescue_from ActionDispatch::Http::Parameters::ParseError do
-      head :unauthorized
+    *Jacob Herrington*
+
+*   Add support for 'private, no-store' Cache-Control headers.
+
+    Previously, 'no-store' was exclusive; no other directives could be specified.
+
+    *Alex Smith*
+
+*   Expand payload of `unpermitted_parameters.action_controller` instrumentation to allow subscribers to
+    know which controller action received unpermitted parameters.
+
+    *bbuchalter*
+
+*   Add `ActionController::Live#send_stream` that makes it more convenient to send generated streams:
+
+    ```ruby
+    send_stream(filename: "subscribers.csv") do |stream|
+      stream.writeln "email_address,updated_at"
+
+      @subscribers.find_each do |subscriber|
+        stream.writeln [ subscriber.email_address, subscriber.updated_at ].join(",")
+      end
     end
     ```
 
-    *Gannon McGibbon*, *Josh Cheek*
+    *DHH*
 
-*   Reset Capybara sessions if failed system test screenshot raising an exception.
+*   Add `ActionController::Live::Buffer#writeln` to write a line to the stream with a newline included.
 
-    Reset Capybara sessions if `take_failed_screenshot` raise exception
-    in system test `after_teardown`.
+    *DHH*
 
-    *Maxim Perepelitsa*
+*   `ActionDispatch::Request#content_type` now returned Content-Type header as it is.
 
-*   Use request object for context if there's no controller
+    Previously, `ActionDispatch::Request#content_type` returned value does NOT contain charset part.
+    This behavior changed to returned Content-Type header containing charset part as it is.
 
-    There is no controller instance when using a redirect route or a
-    mounted rack application so pass the request object as the context
-    when resolving dynamic CSP sources in this scenario.
+    If you want just MIME type, please use `ActionDispatch::Request#media_type` instead.
 
-    Fixes #34200.
+    Before:
 
-    *Andrew White*
+    ```ruby
+    request = ActionDispatch::Request.new("CONTENT_TYPE" => "text/csv; header=present; charset=utf-16", "REQUEST_METHOD" => "GET")
+    request.content_type #=> "text/csv"
+    ```
 
-*   Apply mapping to symbols returned from dynamic CSP sources
+    After:
 
-    Previously if a dynamic source returned a symbol such as :self it
-    would be converted to a string implicity, e.g:
+    ```ruby
+    request = ActionDispatch::Request.new("Content-Type" => "text/csv; header=present; charset=utf-16", "REQUEST_METHOD" => "GET")
+    request.content_type #=> "text/csv; header=present; charset=utf-16"
+    request.media_type   #=> "text/csv"
+    ```
 
-        policy.default_src -> { :self }
+    *Rafael Mendonça França*
 
-    would generate the header:
+*   Change `ActionDispatch::Request#media_type` to return `nil` when the request don't have a `Content-Type` header.
 
-        Content-Security-Policy: default-src self
+    *Rafael Mendonça França*
 
-    and now it generates:
+*   Fix error in `ActionController::LogSubscriber` that would happen when throwing inside a controller action.
 
-        Content-Security-Policy: default-src 'self'
+    *Janko Marohnić*
 
-    *Andrew White*
+*   Allow anything with `#to_str` (like `Addressable::URI`) as a `redirect_to` location
 
-*   Add `ActionController::Parameters#each_value`.
+    *ojab*
 
-    *Lukáš Zapletal*
+*   Change the request method to a `GET` when passing failed requests down to `config.exceptions_app`.
 
-*   Deprecate `ActionDispatch::Http::ParameterFilter` in favor of `ActiveSupport::ParameterFilter`.
+    *Alex Robbin*
 
-    *Yoshiyuki Kinjo*
+*   Deprecate the ability to assign a single value to `config.action_dispatch.trusted_proxies`
+    as `RemoteIp` middleware behaves inconsistently depending on whether this is configured
+    with a single value or an enumerable.
 
-*   Remove undocumented `params` option from `url_for` helper.
+    Fixes #40772
 
-    *Ilkka Oksanen*
+    *Christian Sutter*
 
-*   Encode Content-Disposition filenames on `send_data` and `send_file`.
-    Previously, `send_data 'data', filename: "\u{3042}.txt"` sends
-    `"filename=\"\u{3042}.txt\""` as Content-Disposition and it can be
-    garbled.
-    Now it follows [RFC 2231](https://tools.ietf.org/html/rfc2231) and
-    [RFC 5987](https://tools.ietf.org/html/rfc5987) and sends
-    `"filename=\"%3F.txt\"; filename*=UTF-8''%E3%81%82.txt"`.
-    Most browsers can find filename correctly and old browsers fallback to ASCII
-    converted name.
+*   Add `redirect_back_or_to(fallback_location, **)` as a more aesthetically pleasing version of `redirect_back fallback_location:, **`.
+    The old method name is retained without explicit deprecation.
 
-    *Fumiaki Matsushima*
-
-*   Expose `ActionController::Parameters#each_key` which allows iterating over
-    keys without allocating an array.
-
-    *Richard Schneeman*
-
-*   Purpose metadata for signed/encrypted cookies.
-
-    Rails can now thwart attacks that attempt to copy signed/encrypted value
-    of a cookie and use it as the value of another cookie.
-
-    It does so by stashing the cookie-name in the purpose field which is
-    then signed/encrypted along with the cookie value. Then, on a server-side
-    read, we verify the cookie-names and discard any attacked cookies.
-
-    Enable `action_dispatch.use_cookies_with_metadata` to use this feature, which
-    writes cookies with the new purpose and expiry metadata embedded.
-
-    *Assain Jaleel*
-
-*   Raises `ActionController::RespondToMismatchError` with confliciting `respond_to` invocations.
-
-    `respond_to` can match multiple types and lead to undefined behavior when
-    multiple invocations are made and the types do not match:
-
-        respond_to do |outer_type|
-          outer_type.js do
-            respond_to do |inner_type|
-              inner_type.html { render body: "HTML" }
-            end
-          end
-        end
-
-    *Patrick Toomey*
-
-*   `ActionDispatch::Http::UploadedFile` now delegates `to_path` to its tempfile.
-
-    This allows uploaded file objects to be passed directly to `File.read`
-    without raising a `TypeError`:
-
-        uploaded_file = ActionDispatch::Http::UploadedFile.new(tempfile: tmp_file)
-        File.read(uploaded_file)
-
-    *Aaron Kromer*
-
-*   Pass along arguments to underlying `get` method in `follow_redirect!`.
-
-    Now all arguments passed to `follow_redirect!` are passed to the underlying
-    `get` method. This for example allows to set custom headers for the
-    redirection request to the server.
-
-        follow_redirect!(params: { foo: :bar })
-
-    *Remo Fritzsche*
-
-*   Introduce a new error page to when the implicit render page is accessed in the browser.
-
-    Now instead of showing an error page that with exception and backtraces we now show only
-    one informative page.
-
-    *Vinicius Stock*
-
-*   Introduce `ActionDispatch::DebugExceptions.register_interceptor`.
-
-    Exception aware plugin authors can use the newly introduced
-    `.register_interceptor` method to get the processed exception, instead of
-    monkey patching DebugExceptions.
-
-        ActionDispatch::DebugExceptions.register_interceptor do |request, exception|
-          HypoteticalPlugin.capture_exception(request, exception)
-        end
-
-    *Genadi Samokovarov*
-
-*   Output only one Content-Security-Policy nonce header value per request.
-
-    Fixes #32597.
-
-    *Andrey Novikov*, *Andrew White*
-
-*   Move default headers configuration into their own module that can be included in controllers.
-
-    *Kevin Deisz*
-
-*   Add method `dig` to `session`.
-
-    *claudiob*, *Takumi Shotoku*
-
-*   Controller level `force_ssl` has been deprecated in favor of
-    `config.force_ssl`.
-
-    *Derek Prior*
-
-*   Rails 6 requires Ruby 2.4.1 or newer.
-
-    *Jeremy Daer*
+    *DHH*
 
 
-Please check [5-2-stable](https://github.com/rails/rails/blob/5-2-stable/actionpack/CHANGELOG.md) for previous changes.
+Please check [6-1-stable](https://github.com/rails/rails/blob/6-1-stable/actionpack/CHANGELOG.md) for previous changes.

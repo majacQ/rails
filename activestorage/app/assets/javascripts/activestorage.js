@@ -550,7 +550,7 @@
       this.file = file;
       this.attributes = {
         filename: file.name,
-        content_type: file.type,
+        content_type: file.type || "application/octet-stream",
         byte_size: file.size,
         checksum: checksum
       };
@@ -560,7 +560,10 @@
       this.xhr.setRequestHeader("Content-Type", "application/json");
       this.xhr.setRequestHeader("Accept", "application/json");
       this.xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
-      this.xhr.setRequestHeader("X-CSRF-Token", getMetaValue("csrf-token"));
+      var csrfToken = getMetaValue("csrf-token");
+      if (csrfToken != undefined) {
+        this.xhr.setRequestHeader("X-CSRF-Token", csrfToken);
+      }
       this.xhr.addEventListener("load", function(event) {
         return _this.requestDidLoad(event);
       });
@@ -861,7 +864,7 @@
     if (!started) {
       started = true;
       document.addEventListener("click", didClick, true);
-      document.addEventListener("submit", didSubmitForm);
+      document.addEventListener("submit", didSubmitForm, true);
       document.addEventListener("ajax:before", didSubmitRemoteElement);
     }
   }

@@ -33,6 +33,8 @@ class RescueController < ActionController::Base
   class ResourceUnavailableToRescueAsString < StandardError
   end
 
+  wrap_parameters format: :json
+
   # We use a fully qualified name in some strings, and a relative constant
   # name in some other to test correct handling of both cases.
 
@@ -62,14 +64,6 @@ class RescueController < ActionController::Base
     render plain: exception.message
   end
 
-  rescue_from ActionView::TemplateError do
-    render plain: "action_view templater error"
-  end
-
-  rescue_from IOError do
-    render plain: "io error"
-  end
-
   rescue_from ActionDispatch::Http::Parameters::ParseError do
     render plain: "parse error", status: :bad_request
   end
@@ -77,19 +71,6 @@ class RescueController < ActionController::Base
   before_action(only: :before_action_raises) { raise "umm nice" }
 
   def before_action_raises
-  end
-
-  def raises
-    render plain: "already rendered"
-    raise "don't panic!"
-  end
-
-  def method_not_allowed
-    raise ActionController::MethodNotAllowed.new(:get, :head, :put)
-  end
-
-  def not_implemented
-    raise ActionController::NotImplemented.new(:get, :put)
   end
 
   def not_authorized
@@ -311,7 +292,7 @@ class RescueControllerTest < ActionController::TestCase
     assert_response :unprocessable_entity
   end
 
-  test "rescue when cause has handler, but wrapper doesnt" do
+  test "rescue when cause has handler, but wrapper doesn't" do
     get :exception_with_no_handler_for_wrapper
     assert_response :unprocessable_entity
   end
@@ -325,7 +306,6 @@ class RescueControllerTest < ActionController::TestCase
   end
 
   private
-
     def capture_log_output
       output = StringIO.new
       request.set_header "action_dispatch.logger", ActiveSupport::Logger.new(output)
@@ -351,10 +331,6 @@ class RescueTest < ActionDispatch::IntegrationTest
       raise RecordInvalid
     end
 
-    def b00m
-      raise "b00m"
-    end
-
     private
       def show_errors(exception)
         render plain: exception.message
@@ -376,13 +352,11 @@ class RescueTest < ActionDispatch::IntegrationTest
   end
 
   private
-
     def with_test_routing
       with_routing do |set|
         set.draw do
           get "foo", to: ::RescueTest::TestController.action(:foo)
           get "invalid", to: ::RescueTest::TestController.action(:invalid)
-          get "b00m", to: ::RescueTest::TestController.action(:b00m)
         end
         yield
       end

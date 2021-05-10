@@ -53,6 +53,20 @@ class PersistenceTest < ActiveRecord::TestCase
     assert_not_equal "2 updated", Topic.find(2).content
   end
 
+  def test_class_level_update_without_ids
+    topics = Topic.all
+    assert_equal 5, topics.length
+    topics.each do |topic|
+      assert_not_equal "updated", topic.content
+    end
+
+    updated = Topic.update(content: "updated")
+    assert_equal 5, updated.length
+    updated.each do |topic|
+      assert_equal "updated", topic.content
+    end
+  end
+
   def test_class_level_update_is_affected_by_scoping
     topic_data = { 1 => { "content" => "1 updated" }, 2 => { "content" => "2 updated" } }
 
@@ -72,11 +86,22 @@ class PersistenceTest < ActiveRecord::TestCase
 
   def test_increment_attribute
     assert_equal 50, accounts(:signals37).credit_limit
+
     accounts(:signals37).increment! :credit_limit
     assert_equal 51, accounts(:signals37, :reload).credit_limit
 
     accounts(:signals37).increment(:credit_limit).increment!(:credit_limit)
     assert_equal 53, accounts(:signals37, :reload).credit_limit
+  end
+
+  def test_increment_aliased_attribute
+    assert_equal 50, accounts(:signals37).available_credit
+
+    accounts(:signals37).increment!(:available_credit)
+    assert_equal 51, accounts(:signals37, :reload).available_credit
+
+    accounts(:signals37).increment(:available_credit).increment!(:available_credit)
+    assert_equal 53, accounts(:signals37, :reload).available_credit
   end
 
   def test_increment_nil_attribute
@@ -169,7 +194,7 @@ class PersistenceTest < ActiveRecord::TestCase
     assert_not_predicate company, :valid?
     original_errors = company.errors
     client = company.becomes(Client)
-    assert_equal original_errors.keys, client.errors.keys
+    assert_equal assert_deprecated { original_errors.keys }, assert_deprecated { client.errors.keys }
   end
 
   def test_becomes_errors_base
@@ -183,7 +208,7 @@ class PersistenceTest < ActiveRecord::TestCase
     admin.errors.add :token, :invalid
     child = admin.becomes(child_class)
 
-    assert_equal [:token], child.errors.keys
+    assert_equal [:token], assert_deprecated { child.errors.keys }
     assert_nothing_raised do
       child.errors.add :foo, :invalid
     end
@@ -443,6 +468,51 @@ class PersistenceTest < ActiveRecord::TestCase
     topic_reloaded = Topic.find(topic.id)
     assert_equal("Another New Topic", topic_reloaded.title)
     assert_equal("David", topic_reloaded.author_name)
+  end
+
+  def test_update_attribute_after_update
+    klass = Class.new(Topic) do
+      def self.name; "Topic"; end
+      after_update :update_author, if: :saved_change_to_title?
+      def update_author
+        update_attribute("author_name", "David")
+      end
+    end
+    topic = klass.create(title: "New Topic")
+    topic.update(title: "Another Topic")
+
+    topic_reloaded = Topic.find(topic.id)
+    assert_equal("Another Topic", topic_reloaded.title)
+    assert_equal("David", topic_reloaded.author_name)
+  end
+
+  def test_update_attribute_in_before_validation_respects_callback_chain
+    klass = Class.new(Topic) do
+      def self.name; "Topic"; end
+
+      before_validation :set_author_name
+      after_create :track_create
+      after_update :call_once, if: :saved_change_to_author_name?
+
+      attr_reader :counter
+
+      def set_author_name
+        update_attribute :author_name, "David"
+      end
+
+      def track_create
+        call_once if saved_change_to_author_name?
+      end
+
+      def call_once
+        @counter ||= 0
+        @counter += 1
+      end
+    end
+
+    comment = klass.create(title: "New Topic", author_name: "Not David")
+
+    assert_equal 1, comment.counter
   end
 
   def test_update_attribute_does_not_run_sql_if_attribute_is_not_changed
@@ -851,13 +921,6 @@ class PersistenceTest < ActiveRecord::TestCase
     assert_equal topic.title, Topic.find(1234).title
   end
 
-  def test_update_attributes
-    topic = Topic.find(1)
-    assert_deprecated do
-      topic.update_attributes("title" => "The First Topic Updated")
-    end
-  end
-
   def test_update_parameters
     topic = Topic.find(1)
     assert_nothing_raised do
@@ -888,13 +951,6 @@ class PersistenceTest < ActiveRecord::TestCase
     assert_raise(ActiveRecord::RecordInvalid) { reply.update!(title: nil, content: "Have a nice evening") }
   ensure
     Reply.clear_validators!
-  end
-
-  def test_update_attributes!
-    reply = Reply.find(2)
-    assert_deprecated do
-      reply.update_attributes!("title" => "The Second Topic of the day updated")
-    end
   end
 
   def test_destroyed_returns_boolean

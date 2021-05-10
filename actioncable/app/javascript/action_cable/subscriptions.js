@@ -1,7 +1,8 @@
-import ActionCable from "./index"
+import Subscription from "./subscription"
 
-// Collection class for creating (and internally managing) channel subscriptions. The only method intended to be triggered by the user
-// us ActionCable.Subscriptions#create, and it should be called through the consumer like so:
+// Collection class for creating (and internally managing) channel subscriptions.
+// The only method intended to be triggered by the user is ActionCable.Subscriptions#create,
+// and it should be called through the consumer like so:
 //
 //   App = {}
 //   App.cable = ActionCable.createConsumer("ws://example.com/accounts/1")
@@ -18,7 +19,7 @@ export default class Subscriptions {
   create(channelName, mixin) {
     const channel = channelName
     const params = typeof channel === "object" ? channel : {channel}
-    const subscription = new ActionCable.Subscription(this.consumer, params, mixin)
+    const subscription = new Subscription(this.consumer, params, mixin)
     return this.add(subscription)
   }
 

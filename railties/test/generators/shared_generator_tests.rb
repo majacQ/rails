@@ -10,9 +10,9 @@ module SharedGeneratorTests
     Rails::Generators::AppGenerator.instance_variable_set("@desc", nil)
 
     Kernel.silence_warnings do
-      Thor::Base.shell.send(:attr_accessor, :always_force)
+      Thor::Base.shell.attr_accessor :always_force
       @shell = Thor::Base.shell.new
-      @shell.send(:always_force=, true)
+      @shell.always_force = true
     end
   end
 
@@ -39,7 +39,7 @@ module SharedGeneratorTests
 
   def test_invalid_database_option_raises_an_error
     content = capture(:stderr) { run_generator([destination_root, "-d", "unknown"]) }
-    assert_match(/Invalid value for \-\-database option/, content)
+    assert_match(/Invalid value for --database option/, content)
   end
 
   def test_test_files_are_skipped_if_required
@@ -82,27 +82,25 @@ module SharedGeneratorTests
   end
 
   def test_template_is_executed_when_supplied_an_https_path
-    path = "https://gist.github.com/josevalim/103208/raw/"
-    template = +%{ say "It works!" }
-    template.instance_eval "def read; self; end" # Make the string respond to read
+    url = "https://gist.github.com/josevalim/103208/raw/"
+    generator([destination_root], template: url, skip_webpack_install: true)
 
-    check_open = -> *args do
-      assert_equal [ path, "Accept" => "application/x-thor-template" ], args
-      template
+    applied = nil
+    apply_stub = -> (path, *) { applied = path }
+
+    generator.stub(:apply, apply_stub) do
+      run_generator_instance
     end
 
-    generator([destination_root], template: path, skip_webpack_install: true).stub(:open, check_open, template) do
-      generator.stub :bundle_command, nil do
-        quietly { assert_match(/It works!/, capture(:stdout) { generator.invoke_all }) }
-      end
-    end
+    assert_equal url, applied
   end
 
   def test_skip_gemfile
-    assert_not_called(generator([destination_root], skip_gemfile: true, skip_webpack_install: true), :bundle_command) do
-      quietly { generator.invoke_all }
-      assert_no_file "Gemfile"
-    end
+    generator([destination_root], skip_gemfile: true, skip_webpack_install: true)
+    run_generator_instance
+
+    assert_empty @bundle_commands
+    assert_no_file "Gemfile"
   end
 
   def test_skip_git
@@ -117,7 +115,7 @@ module SharedGeneratorTests
     assert_file ".gitignore" do |content|
       assert_no_match(/\.keep/, content)
     end
-
+    assert_directory("app/assets/images")
     assert_no_file("app/models/concerns/.keep")
   end
 
@@ -127,6 +125,8 @@ module SharedGeneratorTests
       "--skip-active-record",
       "--skip-active-storage",
       "--skip-action-mailer",
+      "--skip-action-mailbox",
+      "--skip-action-text",
       "--skip-action-cable",
       "--skip-sprockets"
     ]
@@ -138,6 +138,10 @@ module SharedGeneratorTests
     assert_file "#{application_path}/config/application.rb", /^# require\s+["']active_storage\/engine["']/
     assert_file "#{application_path}/config/application.rb", /^require\s+["']action_controller\/railtie["']/
     assert_file "#{application_path}/config/application.rb", /^# require\s+["']action_mailer\/railtie["']/
+    unless generator_class.name == "Rails::Generators::PluginGenerator"
+      assert_file "#{application_path}/config/application.rb", /^# require\s+["']action_mailbox\/engine["']/
+      assert_file "#{application_path}/config/application.rb", /^# require\s+["']action_text\/engine["']/
+    end
     assert_file "#{application_path}/config/application.rb", /^require\s+["']action_view\/railtie["']/
     assert_file "#{application_path}/config/application.rb", /^# require\s+["']action_cable\/engine["']/
     assert_file "#{application_path}/config/application.rb", /^# require\s+["']sprockets\/railtie["']/
@@ -185,10 +189,7 @@ module SharedGeneratorTests
       assert_no_match(/fixtures :all/, helper_content)
     end
     assert_file "#{application_path}/bin/setup" do |setup_content|
-      assert_no_match(/db:setup/, setup_content)
-    end
-    assert_file "#{application_path}/bin/update" do |update_content|
-      assert_no_match(/db:migrate/, update_content)
+      assert_no_match(/db:prepare/, setup_content)
     end
     assert_file ".gitignore" do |content|
       assert_no_match(/sqlite/i, content)
@@ -200,7 +201,8 @@ module SharedGeneratorTests
 
     unless generator_class.name == "Rails::Generators::PluginGenerator"
       assert_file "#{application_path}/app/javascript/packs/application.js" do |content|
-        assert_match(/^import \* as ActiveStorage from "activestorage"\nActiveStorage.start\(\)/, content)
+        assert_match(/^import \* as ActiveStorage from "@rails\/activestorage"/, content)
+        assert_match(/^ActiveStorage.start\(\)/, content)
       end
     end
 
@@ -261,7 +263,7 @@ module SharedGeneratorTests
     assert_file "#{application_path}/config/application.rb", /#\s+require\s+["']active_storage\/engine["']/
 
     assert_file "#{application_path}/app/javascript/packs/application.js" do |content|
-      assert_no_match(/^import * as ActiveStorage from "activestorage"\nActiveStorage.start\(\)/, content)
+      assert_no_match(/activestorage/i, content)
     end
 
     assert_file "#{application_path}/config/environments/development.rb" do |content|
@@ -317,6 +319,8 @@ module SharedGeneratorTests
     run_generator [destination_root, "--skip-sprockets"]
 
     assert_no_file "#{application_path}/config/initializers/assets.rb"
+    assert_no_file "#{application_path}/app/assets/config/manifest.js"
+    assert_no_file "#{application_path}/app/assets/stylesheets/application.css"
 
     assert_file "#{application_path}/config/application.rb", /#\s+require\s+["']sprockets\/railtie["']/
 
@@ -340,11 +344,26 @@ module SharedGeneratorTests
     run_generator
     assert_file "#{application_path}/package.json", /dependencies/
     assert_file "#{application_path}/bin/yarn"
+    assert_file "#{application_path}/config/initializers/assets.rb", /node_modules/
   end
 
   def test_generator_for_yarn_skipped
     run_generator([destination_root, "--skip-javascript"])
     assert_no_file "#{application_path}/package.json"
     assert_no_file "#{application_path}/bin/yarn"
+
+    assert_file "#{application_path}/config/initializers/assets.rb" do |content|
+      assert_no_match(/node_modules/, content)
+    end
   end
+
+  private
+    def run_generator_instance
+      @bundle_commands = []
+      bundle_command_stub = -> (command, *) { @bundle_commands << command }
+
+      generator.stub(:bundle_command, bundle_command_stub) do
+        super
+      end
+    end
 end

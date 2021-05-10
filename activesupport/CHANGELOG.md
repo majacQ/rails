@@ -1,292 +1,157 @@
-*   Fix bug where `#to_options` for `ActiveSupport::HashWithIndifferentAccess`
-    would not act as alias for `#symbolize_keys`.
+*   Deprecate `ActiveSupport::SafeBuffer`'s incorrect implicit conversion of objects into string.
 
-    *Nick Weiland*
+    Except for a few methods like `String#%`, objects must implement `#to_str`
+    to be implicitly converted to a String in string operations. In some
+    circumstances `ActiveSupport::SafeBuffer` was incorrectly calling the
+    explicit conversion method (`#to_s`) on them. This behavior is now
+    deprecated.
 
-*   Improve the logic that detects non-autoloaded constants.
+    *Jean Boussier*
 
-    *Jan Habermann*, *Xavier Noria*
+*   Allow nested access to keys on `Rails.application.credentials`
 
-*   Deprecate `ActiveSupport::Multibyte::Unicode#pack_graphemes(array)` and `ActiveSuppport::Multibyte::Unicode#unpack_graphemes(string)`
-    in favor of `array.flatten.pack("U*")` and `string.scan(/\X/).map(&:codepoints)`, respectively.
+    Previously only top level keys in `credentials.yml.enc` could be accessed with method calls. Now any key can.
 
-    *Francesco Rodríguez*
+    For example, given these secrets:
 
-*   Deprecate `ActiveSupport::Multibyte::Chars.consumes?` in favor of `String#is_utf8?`.
-
-    *Francesco Rodríguez*
-
-*   Fix duration being rounded to a full second.
+    ```yml
+    aws:
+       access_key_id: 123
+       secret_access_key: 345
     ```
-      time = DateTime.parse("2018-1-1")
-      time += 0.51.seconds
+
+    `Rails.application.credentials.aws.access_key_id` will now return the same thing as `Rails.application.credentials.aws[:access_key_id]`
+
+    *Alex Ghiculescu*
+
+*   Added a faster and more compact `ActiveSupport::Cache` serialization format.
+
+    It can be enabled with `config.active_support.cache_format_version = 7.0` or
+    `config.load_defaults(7.0)`. Regardless of the configuration Active Support
+    7.0 can read cache entries serialized by Active Support 6.1 which allows to
+    upgrade without invalidating the cache. However Rails 6.1 can't read the
+    new format, so all readers must be upgraded before the new format is enabled.
+
+    *Jean Boussier*
+
+*   Add `Enumerable#sole`, per `ActiveRecord::FinderMethods#sole`.  Returns the
+    sole item of the enumerable, raising if no items are found, or if more than
+    one is.
+
+    *Asherah Connor*
+
+*   Freeze `ActiveSupport::Duration#parts` and remove writer methods.
+
+    Durations are meant to be value objects and should not be mutated.
+
+    *Andrew White*
+
+*   Fix `ActiveSupport::TimeZone#utc_to_local` with fractional seconds.
+
+    When `utc_to_local_returns_utc_offset_times` is false and the time
+    instance had fractional seconds the new UTC time instance was out by
+    a factor of 1,000,000 as the `Time.utc` constructor takes a usec
+    value and not a fractional second value.
+
+    *Andrew White*
+
+*   Add `expires_at` argument to `ActiveSupport::Cache` `write` and `fetch` to set a cache entry TTL as an absolute time.
+
+    ```ruby
+    Rails.cache.write(key, value, expires_at: Time.now.at_end_of_hour)
     ```
-    Will now correctly add 0.51 second and not 1 full second.
 
-    *Edouard Chin*
+    *Jean Boussier*
 
-*   Deprecate `ActiveSupport::Multibyte::Unicode#normalize` and `ActiveSuppport::Multibyte::Chars#normalize`
-    in favor of `String#unicode_normalize`
+*   Deprecate `ActiveSupport::TimeWithZone.name` so that from Rails 7.1 it will use the default implementation.
 
-    *Francesco Rodríguez*
+    *Andrew White*
 
-*   Deprecate `ActiveSupport::Multibyte::Unicode#downcase/upcase/swapcase` in favor of
-    `String#downcase/upcase/swapcase`.
+*   Deprecates Rails custom `Enumerable#sum` and `Array#sum` in favor of Ruby's native implementation which
+    is considerably faster.
 
-    *Francesco Rodríguez*
+    Ruby requires an initializer for non-numeric type as per examples below:
 
-*   Add `ActiveSupport::ParameterFilter`.
+    ```ruby
+    %w[foo bar].sum('') 
+    # instead of %w[foo bar].sum
+    
+    [[1, 2], [3, 4, 5]].sum([])
+    #instead of [[1, 2], [3, 4, 5]].sum
+    ```
 
-    *Yoshiyuki Kinjo*
+    *Alberto Mota*
 
-*   Rename `Module#parent`, `Module#parents`, and `Module#parent_name` to
-    `module_parent`, `module_parents`, and `module_parent_name`.
+*   Tests parallelization is now disabled when running individual files to prevent the setup overhead.
 
-    *Gannon McGibbon*
+    It can still be enforced if the environment variable `PARALLEL_WORKERS` is present and set to a value greater than 1.
 
-*   Deprecate the use of `LoggerSilence` in favor of `ActiveSupport::LoggerSilence`
+    *Ricardo Díaz*
 
-    *Edouard Chin*
+*   Fix proxying keyword arguments in `ActiveSupport::CurrentAttributes`.
 
-*   Deprecate using negative limits in `String#first` and `String#last`.
+    *Marcin Kołodziej*
 
-    *Gannon McGibbon*, *Eric Turner*
+*   Add `Enumerable#maximum` and `Enumerable#minimum` to easily calculate the maximum or minimum from extracted
+    elements of an enumerable.
 
-*   Fix bug where `#without` for `ActiveSupport::HashWithIndifferentAccess` would fail
-    with symbol arguments
+    ```ruby
+    payments = [Payment.new(5), Payment.new(15), Payment.new(10)]
 
-    *Abraham Chan*
+    payments.minimum(:price) # => 5
+    payments.maximum(:price) # => 15
+    ```
 
-*   Treat `#delete_prefix`, `#delete_suffix` and `#unicode_normalize` results as non-`html_safe`.
-    Ensure safety of arguments for `#insert`, `#[]=` and `#replace` calls on `html_safe` Strings.
+    This also allows passing enumerables to `fresh_when` and `stale?` in Action Controller.
+    See PR [#41404](https://github.com/rails/rails/pull/41404) for an example.
 
-    *Janosch Müller*
+    *Ayrton De Craene*
 
-*   Changed `ActiveSupport::TaggedLogging.new` to return a new logger instance instead
-    of mutating the one received as parameter.
+*   `ActiveSupport::Cache::MemCacheStore` now accepts an explicit `nil` for its `addresses` argument.
 
-    *Thierry Joyal*
+    ```ruby
+    config.cache_store = :mem_cache_store, nil
 
-*   Define `unfreeze_time` as an alias of `travel_back` in `ActiveSupport::Testing::TimeHelpers`.
+    # is now equivalent to
 
-    The alias is provided for symmetry with `freeze_time`.
+    config.cache_store = :mem_cache_store
 
-    *Ryan Davidson*
+    # and is also equivalent to
 
-*   Add support for tracing constant autoloads. Just throw
+    config.cache_store = :mem_cache_store, ENV["MEMCACHE_SERVERS"] || "localhost:11211"
 
-        ActiveSupport::Dependencies.logger = Rails.logger
-        ActiveSupport::Dependencies.verbose = true
+    # which is the fallback behavior of Dalli
+    ```
 
-    in an initializer.
+    This helps those migrating from `:dalli_store`, where an explicit `nil` was permitted.
 
-    *Xavier Noria*
+    *Michael Overmeyer*
 
-*   Maintain `html_safe?` on html_safe strings when sliced.
+*   Add `Enumerable#in_order_of` to put an Enumerable in a certain order by a key.
 
-        string = "<div>test</div>".html_safe
-        string[-1..1].html_safe? # => true
+    *DHH*
 
-    *Elom Gomez*, *Yumin Wong*
+*   `ActiveSupport::Inflector.camelize` behaves expected when provided a symbol `:upper` or `:lower` argument. Matches
+    `String#camelize` behavior.
 
-*   Add `Array#extract!`.
+    *Alex Ghiculescu*
 
-    The method removes and returns the elements for which the block returns a true value.
-    If no block is given, an Enumerator is returned instead.
+*   Raises an `ArgumentError` when the first argument of `ActiveSupport::Notification.subscribe` is
+    invalid.
 
-        numbers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        odd_numbers = numbers.extract! { |number| number.odd? } # => [1, 3, 5, 7, 9]
-        numbers # => [0, 2, 4, 6, 8]
+    *Vipul A M*
 
-    *bogdanvlviv*
+*   `HashWithIndifferentAccess#deep_transform_keys` now returns a `HashWithIndifferentAccess` instead of a `Hash`.
 
-*   Support not to cache `nil` for `ActiveSupport::Cache#fetch`.
+    *Nathaniel Woodthorpe*
 
-        cache.fetch('bar', skip_nil: true) { nil }
-        cache.exist?('bar') # => false
+*   consume dalli’s `cache_nils` configuration as `ActiveSupport::Cache`'s `skip_nil` when using `MemCacheStore`.
 
-    *Martin Hong*
+    *Ritikesh G*
 
-*   Add "event object" support to the notification system.
-    Before this change, end users were forced to create hand made artisanal
-    event objects on their own, like this:
+*   add `RedisCacheStore#stats` method similar to `MemCacheStore#stats`. Calls `redis#info` internally.
 
-        ActiveSupport::Notifications.subscribe('wait') do |*args|
-          @event = ActiveSupport::Notifications::Event.new(*args)
-        end
+    *Ritikesh G*
 
-        ActiveSupport::Notifications.instrument('wait') do
-          sleep 1
-        end
 
-        @event.duration # => 1000.138
-
-    After this change, if the block passed to `subscribe` only takes one
-    parameter, the framework will yield an event object to the block.  Now
-    end users are no longer required to make their own:
-
-        ActiveSupport::Notifications.subscribe('wait') do |event|
-          @event = event
-        end
-
-        ActiveSupport::Notifications.instrument('wait') do
-          sleep 1
-        end
-
-        p @event.allocations # => 7
-        p @event.cpu_time    # => 0.256
-        p @event.idle_time   # => 1003.2399
-
-    Now you can enjoy event objects without making them yourself.  Neat!
-
-    *Aaron "t.lo" Patterson*
-
-*   Add cpu_time, idle_time, and allocations to Event.
-
-    *Eileen M. Uchitelle*, *Aaron Patterson*
-
-*   RedisCacheStore: support key expiry in increment/decrement.
-
-    Pass `:expires_in` to `#increment` and `#decrement` to set a Redis EXPIRE on the key.
-
-    If the key is already set to expire, RedisCacheStore won't extend its expiry.
-
-        Rails.cache.increment("some_key", 1, expires_in: 2.minutes)
-
-    *Jason Lee*
-
-*   Allow `Range#===` and `Range#cover?` on Range.
-
-    `Range#cover?` can now accept a range argument like `Range#include?` and
-    `Range#===`. `Range#===` works correctly on Ruby 2.6. `Range#include?` is moved
-    into a new file, with these two methods.
-
-    *Requiring active_support/core_ext/range/include_range is now deprecated.*
-    *Use `require "active_support/core_ext/range/compare_range"` instead.*
-
-    *utilum*
-
-*   Add `index_with` to Enumerable.
-
-    Allows creating a hash from an enumerable with the value from a passed block
-    or a default argument.
-
-        %i( title body ).index_with { |attr| post.public_send(attr) }
-        # => { title: "hey", body: "what's up?" }
-
-        %i( title body ).index_with(nil)
-        # => { title: nil, body: nil }
-
-    Closely linked with `index_by`, which creates a hash where the keys are extracted from a block.
-
-    *Kasper Timm Hansen*
-
-*   Fix bug where `ActiveSupport::Timezone.all` would fail when tzinfo data for
-    any timezone defined in `ActiveSupport::TimeZone::MAPPING` is missing.
-
-    *Dominik Sander*
-
-*   Redis cache store: `delete_matched` no longer blocks the Redis server.
-    (Switches from evaled Lua to a batched SCAN + DEL loop.)
-
-    *Gleb Mazovetskiy*
-
-*   Fix bug where `ActiveSupport::Cache` will massively inflate the storage
-    size when compression is enabled (which is true by default). This patch
-    does not attempt to repair existing data: please manually flush the cache
-    to clear out the problematic entries.
-
-    *Godfrey Chan*
-
-*   Fix bug where `URI.unescape` would fail with mixed Unicode/escaped character input:
-
-        URI.unescape("\xe3\x83\x90")  # => "バ"
-        URI.unescape("%E3%83%90")  # => "バ"
-        URI.unescape("\xe3\x83\x90%E3%83%90")  # => Encoding::CompatibilityError
-
-    *Ashe Connor*, *Aaron Patterson*
-
-*   Add `before?` and `after?` methods to `Date`, `DateTime`,
-    `Time`, and `TimeWithZone`.
-
-    *Nick Holden*
-
-*   `ActiveSupport::Inflector#ordinal` and `ActiveSupport::Inflector#ordinalize` now support
-    translations through I18n.
-
-        # locale/fr.rb
-
-        {
-          fr: {
-            number: {
-              nth: {
-                ordinals: lambda do |_key, number:, **_options|
-                  if number.to_i.abs == 1
-                    'er'
-                  else
-                    'e'
-                  end
-                end,
-
-                ordinalized: lambda do |_key, number:, **_options|
-                  "#{number}#{ActiveSupport::Inflector.ordinal(number)}"
-                end
-              }
-            }
-          }
-        }
-
-
-    *Christian Blais*
-
-*   Add `:private` option to ActiveSupport's `Module#delegate`
-    in order to delegate methods as private:
-
-        class User < ActiveRecord::Base
-          has_one :profile
-          delegate :date_of_birth, to: :profile, private: true
-
-          def age
-            Date.today.year - date_of_birth.year
-          end
-        end
-
-        # User.new.age  # => 29
-        # User.new.date_of_birth
-        # => NoMethodError: private method `date_of_birth' called for #<User:0x00000008221340>
-
-    *Tomas Valent*
-
-*   `String#truncate_bytes` to truncate a string to a maximum bytesize without
-    breaking multibyte characters or grapheme clusters like 👩‍👩‍👦‍👦.
-
-    *Jeremy Daer*
-
-*   `String#strip_heredoc` preserves frozenness.
-
-        "foo".freeze.strip_heredoc.frozen?  # => true
-
-    Fixes that frozen string literals would inadvertently become unfrozen:
-
-        # frozen_string_literal: true
-
-        foo = <<-MSG.strip_heredoc
-          la la la
-        MSG
-
-        foo.frozen?  # => false !??
-
-    *Jeremy Daer*
-
-*   Rails 6 requires Ruby 2.4.1 or newer.
-
-    *Jeremy Daer*
-
-*   Adds parallel testing to Rails.
-
-    Parallelize your test suite with forked processes or threads.
-
-    *Eileen M. Uchitelle*, *Aaron Patterson*
-
-
-Please check [5-2-stable](https://github.com/rails/rails/blob/5-2-stable/activesupport/CHANGELOG.md) for previous changes.
+Please check [6-1-stable](https://github.com/rails/rails/blob/6-1-stable/activesupport/CHANGELOG.md) for previous changes.
