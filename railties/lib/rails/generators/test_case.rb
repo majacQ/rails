@@ -1,7 +1,9 @@
-require_relative "../generators"
-require_relative "testing/behaviour"
-require_relative "testing/setup_and_teardown"
-require_relative "testing/assertions"
+# frozen_string_literal: true
+
+require "rails/generators"
+require "rails/generators/testing/behaviour"
+require "rails/generators/testing/setup_and_teardown"
+require "rails/generators/testing/assertions"
 require "fileutils"
 
 module Rails
@@ -9,7 +11,7 @@ module Rails
     # Disable color in output. Easier to debug.
     no_color!
 
-    # This class provides a TestCase for testing generators. To setup, you need
+    # This class provides a TestCase for testing generators. To set up, you need
     # just to configure the destination and set which generator is being tested:
     #
     #   class AppGeneratorTest < Rails::Generators::TestCase

@@ -1,3 +1,7 @@
+# frozen_string_literal: true
+
+require "active_support/core_ext/hash/indifferent_access"
+
 module ActionDispatch
   class Request
     class Utils # :nodoc:
@@ -47,8 +51,8 @@ module ActionDispatch
             if params.has_key?(:tempfile)
               ActionDispatch::Http::UploadedFile.new(params)
             else
-              params.each_with_object({}) do |(key, val), new_hash|
-                new_hash[key] = normalize_encode_params(val)
+              params.transform_values do |val|
+                normalize_encode_params(val)
               end.with_indifferent_access
             end
           else

@@ -1,5 +1,8 @@
+# frozen_string_literal: true
+
 require "abstract_unit"
 require "active_support/log_subscriber/test_helper"
+require "active_support/messages/rotation_configuration"
 
 # common controller actions
 module RequestForgeryProtectionActions
@@ -109,7 +112,6 @@ class PrependProtectForgeryBaseController < ActionController::Base
   end
 
   private
-
     def add_called_callback(name)
       @called_callbacks ||= []
       @called_callbacks << name
@@ -443,6 +445,19 @@ module RequestForgeryProtectionTests
     end
   end
 
+  def test_should_raise_for_post_with_null_origin
+    forgery_protection_origin_check do
+      session[:_csrf_token] = @token
+      @controller.stub :form_authenticity_token, @token do
+        exception = assert_raises(ActionController::InvalidAuthenticityToken) do
+          @request.set_header "HTTP_ORIGIN", "null"
+          post :index, params: { custom_authenticity_token: @token }
+        end
+        assert_match "The browser returned a 'null' origin for a request", exception.message
+      end
+    end
+  end
+
   def test_should_block_post_with_origin_checking_and_wrong_origin
     old_logger = ActionController::Base.logger
     logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
@@ -502,6 +517,11 @@ module RequestForgeryProtectionTests
     assert_cross_origin_blocked { get :same_origin_js, format: "js" }
     assert_cross_origin_blocked do
       @request.accept = "text/javascript"
+      get :negotiate_same_origin
+    end
+
+    assert_cross_origin_blocked do
+      @request.accept = "application/javascript"
       get :negotiate_same_origin
     end
 
@@ -571,6 +591,15 @@ module RequestForgeryProtectionTests
     end
   end
 
+  def test_should_not_trigger_content_type_deprecation
+    original = ActionDispatch::Response.return_only_media_type_on_content_type
+    ActionDispatch::Response.return_only_media_type_on_content_type = true
+
+    assert_not_deprecated { get :same_origin_js, xhr: true }
+  ensure
+    ActionDispatch::Response.return_only_media_type_on_content_type = original
+  end
+
   def test_should_not_raise_error_if_token_is_not_a_string
     assert_blocked do
       patch :index, params: { custom_authenticity_token: { foo: "bar" } }
@@ -584,8 +613,8 @@ module RequestForgeryProtectionTests
     assert_response :success
   end
 
-  def assert_not_blocked
-    assert_nothing_raised { yield }
+  def assert_not_blocked(&block)
+    assert_nothing_raised(&block)
     assert_response :success
   end
 
@@ -628,13 +657,14 @@ end
 
 class RequestForgeryProtectionControllerUsingNullSessionTest < ActionController::TestCase
   class NullSessionDummyKeyGenerator
-    def generate_key(secret)
+    def generate_key(secret, length = nil)
       "03312270731a2ed0d11ed091c2338a06"
     end
   end
 
   def setup
     @request.env[ActionDispatch::Cookies::GENERATOR_KEY] = NullSessionDummyKeyGenerator.new
+    @request.env[ActionDispatch::Cookies::COOKIES_ROTATIONS] = ActiveSupport::Messages::RotationConfiguration.new
   end
 
   test "should allow to set signed cookies" do
@@ -729,7 +759,7 @@ class FreeCookieControllerTest < ActionController::TestCase
   test "should not emit a csrf-token meta tag" do
     SecureRandom.stub :base64, @token do
       get :meta
-      assert @response.body.blank?
+      assert_predicate @response.body, :blank?
     end
   end
 end
@@ -803,6 +833,32 @@ class PerFormTokensControllerTest < ActionController::TestCase
       post :post_one, params: { custom_authenticity_token: form_token }
     end
     assert_response :success
+  end
+
+  def test_accepts_token_with_path_with_query_params
+    get :index
+    form_token = assert_presence_and_fetch_form_csrf_token
+    assert_matches_session_token_on_server form_token
+
+    @request.env["PATH_INFO"] = "/per_form_tokens/post_one"
+    @request.env["QUERY_STRING"] = "key=value"
+    assert_nothing_raised do
+      post :post_one, params: { custom_authenticity_token: form_token }
+    end
+  end
+
+  def test_rejects_garbage_path
+    get :index
+
+    form_token = assert_presence_and_fetch_form_csrf_token
+
+    assert_matches_session_token_on_server form_token
+
+    # Set invalid URI in PATH_INFO
+    @request.env["PATH_INFO"] = "/foo/bar<"
+    assert_raise ActionController::InvalidAuthenticityToken do
+      post :post_one, params: { custom_authenticity_token: form_token }
+    end
   end
 
   def test_rejects_token_for_incorrect_path
@@ -890,7 +946,7 @@ class PerFormTokensControllerTest < ActionController::TestCase
     assert_response :success
   end
 
-  def test_ignores_params
+  def test_chomps_slashes
     get :index, params: { form_path: "/per_form_tokens/post_one?foo=bar" }
 
     form_token = assert_presence_and_fetch_form_csrf_token
@@ -898,7 +954,7 @@ class PerFormTokensControllerTest < ActionController::TestCase
     assert_matches_session_token_on_server form_token
 
     # This is required because PATH_INFO isn't reset between requests.
-    @request.env["PATH_INFO"] = "/per_form_tokens/post_one?foo=baz"
+    @request.env["PATH_INFO"] = "/per_form_tokens/post_one/"
     assert_nothing_raised do
       post :post_one, params: { custom_authenticity_token: form_token, baz: "foo" }
     end
@@ -989,8 +1045,8 @@ class SkipProtectionControllerTest < ActionController::TestCase
     end
   end
 
-  def assert_not_blocked
-    assert_nothing_raised { yield }
+  def assert_not_blocked(&block)
+    assert_nothing_raised(&block)
     assert_response :success
   end
 end

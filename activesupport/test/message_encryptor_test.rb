@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "abstract_unit"
+require_relative "abstract_unit"
 require "openssl"
 require "active_support/time"
 require "active_support/json"
@@ -65,7 +65,7 @@ class MessageEncryptorTest < ActiveSupport::TestCase
     prev = ActiveSupport.use_standard_json_time_format
     ActiveSupport.use_standard_json_time_format = true
     encryptor = ActiveSupport::MessageEncryptor.new(SecureRandom.random_bytes(32), SecureRandom.random_bytes(128), serializer: JSONSerializer.new)
-    message = encryptor.encrypt_and_sign(:foo => 123, "bar" => Time.utc(2010))
+    message = encryptor.encrypt_and_sign({ :foo => 123, "bar" => Time.utc(2010) })
     exp = { "foo" => 123, "bar" => "2010-01-01T00:00:00.000Z" }
     assert_equal exp, encryptor.decrypt_and_verify(message)
   ensure
@@ -115,6 +115,100 @@ class MessageEncryptorTest < ActiveSupport::TestCase
     assert_equal "Ruby on Rails", encryptor.decrypt_and_verify(encrypted_message)
   end
 
+  def test_rotating_secret
+    old_message = ActiveSupport::MessageEncryptor.new(secrets[:old], cipher: "aes-256-gcm").encrypt_and_sign("old")
+
+    encryptor = ActiveSupport::MessageEncryptor.new(@secret, cipher: "aes-256-gcm")
+    encryptor.rotate secrets[:old]
+
+    assert_equal "old", encryptor.decrypt_and_verify(old_message)
+  end
+
+  def test_rotating_serializer
+    old_message = ActiveSupport::MessageEncryptor.new(secrets[:old], cipher: "aes-256-gcm", serializer: JSON).
+      encrypt_and_sign({ ahoy: :hoy })
+
+    encryptor = ActiveSupport::MessageEncryptor.new(@secret, cipher: "aes-256-gcm", serializer: JSON)
+    encryptor.rotate secrets[:old]
+
+    assert_equal({ "ahoy" => "hoy" }, encryptor.decrypt_and_verify(old_message))
+  end
+
+  def test_rotating_aes_cbc_secrets
+    old_encryptor = ActiveSupport::MessageEncryptor.new(secrets[:old], "old sign", cipher: "aes-256-cbc")
+    old_message = old_encryptor.encrypt_and_sign("old")
+
+    encryptor = ActiveSupport::MessageEncryptor.new(@secret)
+    encryptor.rotate secrets[:old], "old sign", cipher: "aes-256-cbc"
+
+    assert_equal "old", encryptor.decrypt_and_verify(old_message)
+  end
+
+  def test_multiple_rotations
+    older_message = ActiveSupport::MessageEncryptor.new(secrets[:older], "older sign").encrypt_and_sign("older")
+    old_message = ActiveSupport::MessageEncryptor.new(secrets[:old], "old sign").encrypt_and_sign("old")
+
+    encryptor = ActiveSupport::MessageEncryptor.new(@secret)
+    encryptor.rotate secrets[:old], "old sign"
+    encryptor.rotate secrets[:older], "older sign"
+
+    assert_equal "new",   encryptor.decrypt_and_verify(encryptor.encrypt_and_sign("new"))
+    assert_equal "old",   encryptor.decrypt_and_verify(old_message)
+    assert_equal "older", encryptor.decrypt_and_verify(older_message)
+  end
+
+  def test_on_rotation_is_called_and_returns_modified_messages
+    older_message = ActiveSupport::MessageEncryptor.new(secrets[:older], "older sign").encrypt_and_sign({ encoded: "message" })
+
+    encryptor = ActiveSupport::MessageEncryptor.new(@secret)
+    encryptor.rotate secrets[:old]
+    encryptor.rotate secrets[:older], "older sign"
+
+    rotated = false
+    message = encryptor.decrypt_and_verify(older_message, on_rotation: proc { rotated = true })
+
+    assert_equal({ encoded: "message" }, message)
+    assert rotated
+  end
+
+  def test_on_rotation_can_be_passed_at_the_constructor_level
+    older_message = ActiveSupport::MessageEncryptor.new(secrets[:older], "older sign").encrypt_and_sign({ encoded: "message" })
+
+    rotated = rotated = false  # double assigning to suppress "assigned but unused variable" warning
+    encryptor = ActiveSupport::MessageEncryptor.new(@secret, on_rotation: proc { rotated = true })
+    encryptor.rotate secrets[:older], "older sign"
+
+    assert_changes(:rotated, from: false, to: true) do
+      message = encryptor.decrypt_and_verify(older_message)
+
+      assert_equal({ encoded: "message" }, message)
+    end
+  end
+
+  def test_on_rotation_option_takes_precedence_over_the_one_given_in_constructor
+    older_message = ActiveSupport::MessageEncryptor.new(secrets[:older], "older sign").encrypt_and_sign({ encoded: "message" })
+
+    rotated = rotated = false  # double assigning to suppress "assigned but unused variable" warning
+    encryptor = ActiveSupport::MessageEncryptor.new(@secret, on_rotation: proc { rotated = true })
+    encryptor.rotate secrets[:older], "older sign"
+
+    assert_changes(:rotated, from: false, to: "Yes") do
+      message = encryptor.decrypt_and_verify(older_message, on_rotation: proc { rotated = "Yes" })
+
+      assert_equal({ encoded: "message" }, message)
+    end
+  end
+
+  def test_with_rotated_metadata
+    old_message = ActiveSupport::MessageEncryptor.new(secrets[:old], cipher: "aes-256-gcm").
+      encrypt_and_sign("metadata", purpose: :rotation)
+
+    encryptor = ActiveSupport::MessageEncryptor.new(@secret, cipher: "aes-256-gcm")
+    encryptor.rotate secrets[:old]
+
+    assert_equal "metadata", encryptor.decrypt_and_verify(old_message, purpose: :rotation)
+  end
+
   private
     def assert_aead_not_decrypted(encryptor, value)
       assert_raise(ActiveSupport::MessageEncryptor::InvalidMessage) do
@@ -134,6 +228,10 @@ class MessageEncryptorTest < ActiveSupport::TestCase
       end
     end
 
+    def secrets
+      @secrets ||= Hash.new { |h, k| h[k] = SecureRandom.random_bytes(32) }
+    end
+
     def munge(base64_string)
       bits = ::Base64.strict_decode64(base64_string)
       bits.reverse!
@@ -146,19 +244,19 @@ class MessageEncryptorMetadataTest < ActiveSupport::TestCase
 
   setup do
     @secret    = SecureRandom.random_bytes(32)
-    @encryptor = ActiveSupport::MessageEncryptor.new(@secret, encryptor_options)
+    @encryptor = ActiveSupport::MessageEncryptor.new(@secret, **encryptor_options)
   end
 
   private
     def generate(message, **options)
-      @encryptor.encrypt_and_sign(message, options)
+      @encryptor.encrypt_and_sign(message, **options)
     end
 
     def parse(data, **options)
-      @encryptor.decrypt_and_verify(data, options)
+      @encryptor.decrypt_and_verify(data, **options)
     end
 
-    def encryptor_options; end
+    def encryptor_options; {} end
 end
 
 class MessageEncryptorMetadataMarshalTest < MessageEncryptorMetadataTest

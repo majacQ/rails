@@ -1,4 +1,6 @@
-require_relative "../../generators"
+# frozen_string_literal: true
+
+require "rails/generators"
 
 module Rails
   module Command
@@ -19,7 +21,7 @@ module Rails
         require_application_and_environment!
         load_generators
 
-        ARGV.shift
+        ARGV.replace(args) # set up ARGV for third-party libraries
 
         Rails::Generators.invoke generator, args, behavior: :invoke, destination_root: Rails::Command.root
       end

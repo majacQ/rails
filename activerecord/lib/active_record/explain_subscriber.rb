@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/notifications"
-require_relative "explain_registry"
+require "active_record/explain_registry"
 
 module ActiveRecord
   class ExplainSubscriber # :nodoc:
@@ -26,7 +26,7 @@ module ActiveRecord
       payload[:exception] ||
         payload[:cached] ||
         IGNORED_PAYLOADS.include?(payload[:name]) ||
-        payload[:sql] !~ EXPLAINED_SQLS
+        !payload[:sql].match?(EXPLAINED_SQLS)
     end
 
     ActiveSupport::Notifications.subscribe("sql.active_record", new)

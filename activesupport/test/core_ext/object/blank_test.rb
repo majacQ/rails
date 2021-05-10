@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "abstract_unit"
+require_relative "../../abstract_unit"
 require "active_support/core_ext/object/blank"
 
 class BlankTest < ActiveSupport::TestCase
@@ -16,8 +16,8 @@ class BlankTest < ActiveSupport::TestCase
     end
   end
 
-  BLANK = [ EmptyTrue.new, nil, false, "", "   ", "  \n\t  \r ", "　", "\u00a0", [], {} ]
-  NOT   = [ EmptyFalse.new, Object.new, true, 0, 1, "a", [nil], { nil => 0 }, Time.now ]
+  BLANK = [ EmptyTrue.new, nil, false, "", "   ", "  \n\t  \r ", "　", "\u00a0", [], {}, " ".encode("UTF-16LE") ]
+  NOT   = [ EmptyFalse.new, Object.new, true, 0, 1, "a", [nil], { nil => 0 }, Time.now, "my value".encode("UTF-16LE") ]
 
   def test_blank
     BLANK.each { |v| assert_equal true, v.blank?,  "#{v.inspect} should be blank" }

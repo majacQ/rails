@@ -2,15 +2,28 @@
 
 require "cases/helper"
 require "models/post"
+require "models/author"
 require "models/comment"
+require "models/categorization"
+
 
 module ActiveRecord
   class WhereChainTest < ActiveRecord::TestCase
-    fixtures :posts
+    fixtures :posts, :authors
 
     def setup
       super
       @name = "title"
+    end
+
+    def test_missing_with_association
+      assert posts(:authorless).author.blank?
+      assert_equal [posts(:authorless)], Post.where.missing(:author).to_a
+    end
+
+    def test_missing_with_multiple_association
+      assert posts(:authorless).comments.empty?
+      assert_equal [posts(:authorless)], Post.where.missing(:author, :comments).to_a
     end
 
     def test_not_inverts_where_clause
@@ -27,7 +40,7 @@ module ActiveRecord
     end
 
     def test_association_not_eq
-      expected = Arel::Nodes::Grouping.new(Comment.arel_table[@name].not_eq(Arel::Nodes::BindParam.new))
+      expected = Comment.arel_table[@name].not_eq(Arel::Nodes::BindParam.new(1))
       relation = Post.joins(:comments).where.not(comments: { title: "hello" })
       assert_equal(expected.to_sql, relation.where_clause.ast.to_sql)
     end

@@ -1,114 +1,237 @@
-*   Make the order of `Hash#reverse_merge!` consistent with `HashWithIndifferentAccess`.
+*   Support `prepend` with `ActiveSupport::Concern`.
 
-    *Erol Fornoles*
+    Allows a module with `extend ActiveSupport::Concern` to be prepended.
 
-*   Add `freeze_time` helper which freezes time to `Time.now` in tests.
+        module Imposter
+          extend ActiveSupport::Concern
 
-    *Prathamesh Sonpatki*
+          # Same as `included`, except only run when prepended.
+          prepended do
+          end
+        end
 
-*   Default `ActiveSupport::MessageEncryptor` to use AES 256 GCM encryption.
+        class Person
+          prepend Imposter
+        end
 
-    On for new Rails 5.2 apps. Upgrading apps can find the config as a new
-    framework default.
+    Class methods are prepended to the base class, concerning is also 
+    updated: `concerning :Imposter, prepend: true do`.
 
-    *Assain Jaleel*
+    *Jason Karns*, *Elia Schito*
 
-*   Cache: `write_multi`
+*   Deprecate using `Range#include?` method to check the inclusion of a value
+    in a date time range. It is recommended to use `Range#cover?` method
+    instead of `Range#include?` to check the inclusion of a value
+    in a date time range.
 
-        Rails.cache.write_multi foo: 'bar', baz: 'qux'
+    *Vishal Telangre*
 
-    Plus faster fetch_multi with stores that implement `write_multi_entries`.
-    Keys that aren't found may be written to the cache store in one shot
-    instead of separate writes.
+*   Support added for a `round_mode` parameter, in all number helpers. (See: `BigDecimal::mode`.)
 
-    The default implementation simply calls `write_entry` for each entry.
-    Stores may override if they're capable of one-shot bulk writes, like
-    Redis `MSET`.
+    ```ruby
+    number_to_currency(1234567890.50, precision: 0, round_mode: :half_down) # => "$1,234,567,890"
+    number_to_percentage(302.24398923423, precision: 5, round_mode: :down) # => "302.24398%"
+    number_to_rounded(389.32314, precision: 0, round_mode: :ceil) # => "390"
+    number_to_human_size(483989, precision: 2, round_mode: :up) # => "480 KB"
+    number_to_human(489939, precision: 2, round_mode: :floor) # => "480 Thousand"
 
-    *Jeremy Daer*
+    485000.to_s(:human, precision: 2, round_mode: :half_even) # => "480 Thousand"
+    ```
 
-*   Add default option to module and class attribute accessors.
+    *Tom Lord*
 
-        mattr_accessor :settings, default: {}
-
-    Works for `mattr_reader`, `mattr_writer`, `cattr_accessor`, `cattr_reader`,
-    and `cattr_writer` as well.
-
-    *Genadi Samokovarov*
-
-*   Add `Date#prev_occurring` and `Date#next_occurring` to return specified next/previous occurring day of week.
-
-    *Shota Iguchi*
-
-*   Add default option to `class_attribute`.
+*   `Array#to_sentence` no longer returns a frozen string.
 
     Before:
 
-        class_attribute :settings
-        self.settings = {}
+        ['one', 'two'].to_sentence.frozen?
+        # => true
 
-    Now:
+    After:
 
-        class_attribute :settings, default: {}
+        ['one', 'two'].to_sentence.frozen?
+        # => false
 
-    *DHH*
+    *Nicolas Dular*
 
-*   `#singularize` and `#pluralize` now respect uncountables for the specified locale.
+*   When an instance of `ActiveSupport::Duration` is converted to an `iso8601` duration string, if `weeks` are mixed with `date` parts, the `week` part will be converted to days.
+    This keeps the parser and serializer on the same page.
 
-    *Eilis Hamilton*
+    ```ruby
+    duration = ActiveSupport::Duration.build(1000000)
+    # 1 week, 4 days, 13 hours, 46 minutes, and 40.0 seconds
 
-*   Add `ActiveSupport::CurrentAttributes` to provide a thread-isolated attributes singleton.
-    Primary use case is keeping all the per-request attributes easily available to the whole system.
+    duration_iso = duration.iso8601
+    # P11DT13H46M40S
 
-    *DHH*
+    ActiveSupport::Duration.parse(duration_iso)
+    # 11 days, 13 hours, 46 minutes, and 40 seconds
 
-*   Fix implicit coercion calculations with scalars and durations
+    duration = ActiveSupport::Duration.build(604800)
+    # 1 week
 
-    Previously calculations where the scalar is first would be converted to a duration
-    of seconds but this causes issues with dates being converted to times, e.g:
+    duration_iso = duration.iso8601
+    # P1W
 
-        Time.zone = "Beijing"           # => Asia/Shanghai
-        date = Date.civil(2017, 5, 20)  # => Mon, 20 May 2017
-        2 * 1.day                       # => 172800 seconds
-        date + 2 * 1.day                # => Mon, 22 May 2017 00:00:00 CST +08:00
+    ActiveSupport::Duration.parse(duration_iso)
+    # 1 week
+    ```
 
-    Now the `ActiveSupport::Duration::Scalar` calculation methods will try to maintain
-    the part structure of the duration where possible, e.g:
+    *Abhishek Sarkar*
 
-        Time.zone = "Beijing"           # => Asia/Shanghai
-        date = Date.civil(2017, 5, 20)  # => Mon, 20 May 2017
-        2 * 1.day                       # => 2 days
-        date + 2 * 1.day                # => Mon, 22 May 2017
+*   Add block support to `ActiveSupport::Testing::TimeHelpers#travel_back`.
 
-    Fixes #29160, #28970.
+    *Tim Masliuchenko*
 
-    *Andrew White*
+*   Update `ActiveSupport::Messages::Metadata#fresh?` to work for cookies with expiry set when
+    `ActiveSupport.parse_json_times = true`.
 
-*   Add support for versioned cache entries. This enables the cache stores to recycle cache keys, greatly saving
-    on storage in cases with frequent churn. Works together with the separation of `#cache_key` and `#cache_version`
-    in Active Record and its use in Action Pack's fragment caching.
+    *Christian Gregg*
 
-    *DHH*
+*   Support symbolic links for `content_path` in `ActiveSupport::EncryptedFile`.
 
-*   Pass gem name and deprecation horizon to deprecation notifications.
+    *Takumi Shotoku*
 
-    *Willem van Bergen*
+*   Improve `Range#===`, `Range#include?`, and `Range#cover?` to work with beginless (startless)
+    and endless range targets.
 
-*   Add support for `:offset` and `:zone` to `ActiveSupport::TimeWithZone#change`
+    *Allen Hsu*, *Andrew Hodgkinson*
 
-    *Andrew White*
+*   Don't use `Process#clock_gettime(CLOCK_THREAD_CPUTIME_ID)` on Solaris.
 
-*   Add support for `:offset` to `Time#change`
+    *Iain Beeston*
 
-    Fixes #28723.
+*   Prevent `ActiveSupport::Duration.build(value)` from creating instances of
+    `ActiveSupport::Duration` unless `value` is of type `Numeric`.
 
-    *Andrew White*
+    Addresses the errant set of behaviours described in #37012 where
+    `ActiveSupport::Duration` comparisons would fail confusingly
+    or return unexpected results when comparing durations built from instances of `String`.
 
-*   Add `fetch_values` for `HashWithIndifferentAccess`
+    Before:
 
-    The method was originally added to `Hash` in Ruby 2.3.0.
+        small_duration_from_string = ActiveSupport::Duration.build('9')
+        large_duration_from_string = ActiveSupport::Duration.build('100000000000000')
+        small_duration_from_int = ActiveSupport::Duration.build(9)
 
-    *Josh Pencheon*
+        large_duration_from_string > small_duration_from_string
+        # => false
+
+        small_duration_from_string == small_duration_from_int
+        # => false
+
+        small_duration_from_int < large_duration_from_string
+        # => ArgumentError (comparison of ActiveSupport::Duration::Scalar with ActiveSupport::Duration failed)
+
+        large_duration_from_string > small_duration_from_int
+        # => ArgumentError (comparison of String with ActiveSupport::Duration failed)
+
+    After:
+
+        small_duration_from_string = ActiveSupport::Duration.build('9')
+        # => TypeError (can't build an ActiveSupport::Duration from a String)
+
+    *Alexei Emam*
+
+*   Add `ActiveSupport::Cache::Store#delete_multi` method to delete multiple keys from the cache store.
+
+    *Peter Zhu*
+
+*   Support multiple arguments in `HashWithIndifferentAccess` for `merge` and `update` methods, to
+    follow Ruby 2.6 addition.
+
+    *Wojciech Wnętrzak*
+
+*   Allow initializing `thread_mattr_*` attributes via `:default` option.
+
+        class Scraper
+          thread_mattr_reader :client, default: Api::Client.new
+        end
+
+    *Guilherme Mansur*
+
+*   Add `compact_blank` for those times when you want to remove #blank? values from
+    an Enumerable (also `compact_blank!` on Hash, Array, ActionController::Parameters).
+
+    *Dana Sherson*
+
+*   Make ActiveSupport::Logger Fiber-safe.
+
+    Use `Fiber.current.__id__` in `ActiveSupport::Logger#local_level=` in order
+    to make log level local to Ruby Fibers in addition to Threads.
+
+    Example:
+
+        logger = ActiveSupport::Logger.new(STDOUT)
+        logger.level = 1
+        puts "Main is debug? #{logger.debug?}"
+
+        Fiber.new {
+          logger.local_level = 0
+          puts "Thread is debug? #{logger.debug?}"
+        }.resume
+
+        puts "Main is debug? #{logger.debug?}"
+
+    Before:
+
+        Main is debug? false
+        Thread is debug? true
+        Main is debug? true
+
+    After:
+
+        Main is debug? false
+        Thread is debug? true
+        Main is debug? false
+
+    Fixes #36752.
+
+    *Alexander Varnin*
+
+*   Allow the `on_rotation` proc used when decrypting/verifying a message to be
+    passed at the constructor level.
+
+    Before:
+
+        crypt = ActiveSupport::MessageEncryptor.new('long_secret')
+        crypt.decrypt_and_verify(encrypted_message, on_rotation: proc { ... })
+        crypt.decrypt_and_verify(another_encrypted_message, on_rotation: proc { ... })
+
+    After:
+
+        crypt = ActiveSupport::MessageEncryptor.new('long_secret', on_rotation: proc { ... })
+        crypt.decrypt_and_verify(encrypted_message)
+        crypt.decrypt_and_verify(another_encrypted_message)
+
+    *Edouard Chin*
+
+*   `delegate_missing_to` would raise a `DelegationError` if the object
+    delegated to was `nil`. Now the `allow_nil` option has been added to enable
+    the user to specify they want `nil` returned in this case.
+
+    *Matthew Tanous*
+
+*   `truncate` would return the original string if it was too short to be truncated
+    and a frozen string if it were long enough to be truncated. Now truncate will
+    consistently return an unfrozen string regardless. This behavior is consistent
+    with `gsub` and `strip`.
+
+    Before:
+
+        'foobar'.truncate(5).frozen?
+        # => true
+        'foobar'.truncate(6).frozen?
+        # => false
+
+    After:
+
+        'foobar'.truncate(5).frozen?
+        # => false
+        'foobar'.truncate(6).frozen?
+        # => false
+
+    *Jordan Thomas*
 
 
-Please check [5-1-stable](https://github.com/rails/rails/blob/5-1-stable/activesupport/CHANGELOG.md) for previous changes.
+Please check [6-0-stable](https://github.com/rails/rails/blob/6-0-stable/activesupport/CHANGELOG.md) for previous changes.

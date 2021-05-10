@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module AbstractController
   module Caching
     extend ActiveSupport::Concern
@@ -13,7 +15,7 @@ module AbstractController
       end
 
       def cache_store=(store)
-        config.cache_store = ActiveSupport::Cache.lookup_store(store)
+        config.cache_store = ActiveSupport::Cache.lookup_store(*store)
       end
 
       private

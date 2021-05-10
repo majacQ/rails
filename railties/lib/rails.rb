@@ -1,16 +1,18 @@
-require_relative "rails/ruby_version_check"
+# frozen_string_literal: true
+
+require "rails/ruby_version_check"
 
 require "pathname"
 
 require "active_support"
-require "active_support/dependencies/autoload"
 require "active_support/core_ext/kernel/reporting"
 require "active_support/core_ext/module/delegation"
 require "active_support/core_ext/array/extract_options"
 require "active_support/core_ext/object/blank"
 
-require_relative "rails/application"
-require_relative "rails/version"
+require "rails/application"
+require "rails/version"
+require "rails/autoloaders"
 
 require "active_support/railtie"
 require "action_dispatch/railtie"
@@ -48,7 +50,7 @@ module Rails
     def backtrace_cleaner
       @backtrace_cleaner ||= begin
         # Relies on Active Support, so we have to lazy load to postpone definition until Active Support has been loaded
-        require_relative "rails/backtrace_cleaner"
+        require "rails/backtrace_cleaner"
         Rails::BacktraceCleaner.new
       end
     end
@@ -84,11 +86,9 @@ module Rails
     # * The environment variable RAILS_GROUPS;
     # * The optional envs given as argument and the hash with group dependencies;
     #
-    #   groups assets: [:development, :test]
-    #
-    #   # Returns
-    #   # => [:default, "development", :assets] for Rails.env == "development"
-    #   # => [:default, "production"]           for Rails.env == "production"
+    #  Rails.groups assets: [:development, :test]
+    #  # => [:default, "development", :assets] for Rails.env == "development"
+    #  # => [:default, "production"]           for Rails.env == "production"
     def groups(*groups)
       hash = groups.extract_options!
       env = Rails.env
@@ -107,6 +107,10 @@ module Rails
     #     # => #<Pathname:/Users/someuser/some/path/project/public>
     def public_path
       application && Pathname.new(application.paths["public"].first)
+    end
+
+    def autoloaders
+      Autoloaders
     end
   end
 end

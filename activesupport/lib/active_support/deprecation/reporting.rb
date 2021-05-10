@@ -6,7 +6,7 @@ module ActiveSupport
   class Deprecation
     module Reporting
       # Whether to print a message (silent mode)
-      attr_accessor :silenced
+      attr_writer :silenced
       # Name of gem where method is deprecated
       attr_accessor :gem_name
 
@@ -20,7 +20,11 @@ module ActiveSupport
 
         callstack ||= caller_locations(2)
         deprecation_message(callstack, message).tap do |m|
-          behavior.each { |b| b.call(m, callstack, deprecation_horizon, gem_name) }
+          if deprecation_disallowed?(message)
+            disallowed_behavior.each { |b| b.call(m, callstack, deprecation_horizon, gem_name) }
+          else
+            behavior.each { |b| b.call(m, callstack, deprecation_horizon, gem_name) }
+          end
         end
       end
 
@@ -33,11 +37,50 @@ module ActiveSupport
       #     ActiveSupport::Deprecation.warn('something broke!')
       #   end
       #   # => nil
-      def silence
-        old_silenced, @silenced = @silenced, true
-        yield
-      ensure
-        @silenced = old_silenced
+      def silence(&block)
+        @silenced_thread.bind(true, &block)
+      end
+
+      # Allow previously disallowed deprecation warnings within the block.
+      # <tt>allowed_warnings</tt> can be an array containing strings, symbols, or regular
+      # expressions. (Symbols are treated as strings). These are compared against
+      # the text of deprecation warning messages generated within the block.
+      # Matching warnings will be exempt from the rules set by
+      # +ActiveSupport::Deprecation.disallowed_warnings+
+      #
+      # The optional <tt>if:</tt> argument accepts a truthy/falsy value or an object that
+      # responds to <tt>.call</tt>. If truthy, then matching warnings will be allowed.
+      # If falsey then the method yields to the block without allowing the warning.
+      #
+      #   ActiveSupport::Deprecation.disallowed_behavior = :raise
+      #   ActiveSupport::Deprecation.disallowed_warnings = [
+      #     "something broke"
+      #   ]
+      #
+      #   ActiveSupport::Deprecation.warn('something broke!')
+      #   # => ActiveSupport::DeprecationException
+      #
+      #   ActiveSupport::Deprecation.allow ['something broke'] do
+      #     ActiveSupport::Deprecation.warn('something broke!')
+      #   end
+      #   # => nil
+      #
+      #   ActiveSupport::Deprecation.allow ['something broke'], if: Rails.env.production? do
+      #     ActiveSupport::Deprecation.warn('something broke!')
+      #   end
+      #   # => ActiveSupport::DeprecationException for dev/test, nil for production
+      def allow(allowed_warnings = :all, if: true, &block)
+        conditional = binding.local_variable_get(:if)
+        conditional = conditional.call if conditional.respond_to?(:call)
+        if conditional
+          @explicitly_allowed_warnings.bind(allowed_warnings, &block)
+        else
+          yield
+        end
+      end
+
+      def silenced
+        @silenced || @silenced_thread.value
       end
 
       def deprecation_warning(deprecated_method_name, message = nil, caller_backtrace = nil)
@@ -61,7 +104,7 @@ module ActiveSupport
           case message
           when Symbol then "#{warning} (use #{message} instead)"
           when String then "#{warning} (#{message})"
-            else warning
+          else warning
           end
         end
 
@@ -104,7 +147,7 @@ module ActiveSupport
           end
         end
 
-        RAILS_GEM_ROOT = File.expand_path("../../../..", __dir__)
+        RAILS_GEM_ROOT = File.expand_path("../../../..", __dir__) + "/"
 
         def ignored_callstack(path)
           path.start_with?(RAILS_GEM_ROOT) || path.start_with?(RbConfig::CONFIG["rubylibdir"])

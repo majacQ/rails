@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "../../xml_mini"
-require_relative "../hash/keys"
-require_relative "../string/inflections"
-require_relative "../object/to_param"
-require_relative "../object/to_query"
+require "active_support/xml_mini"
+require "active_support/core_ext/hash/keys"
+require "active_support/core_ext/string/inflections"
+require "active_support/core_ext/object/to_param"
+require "active_support/core_ext/object/to_query"
 
 class Array
   # Converts the array to a comma-separated sentence where the last element is
@@ -74,13 +74,13 @@ class Array
 
     case length
     when 0
-      ""
+      +""
     when 1
-      "#{self[0]}"
+      +"#{self[0]}"
     when 2
-      "#{self[0]}#{options[:two_words_connector]}#{self[1]}"
+      +"#{self[0]}#{options[:two_words_connector]}#{self[1]}"
     else
-      "#{self[0...-1].join(options[:words_connector])}#{options[:last_word_connector]}#{self[-1]}"
+      +"#{self[0...-1].join(options[:words_connector])}#{options[:last_word_connector]}#{self[-1]}"
     end
   end
 
@@ -181,7 +181,7 @@ class Array
   #   </messages>
   #
   def to_xml(options = {})
-    require_relative "../../builder" unless defined?(Builder)
+    require "active_support/builder" unless defined?(Builder)
 
     options = options.dup
     options[:indent]  ||= 2

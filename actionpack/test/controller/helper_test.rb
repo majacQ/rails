@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require "abstract_unit"
 
 ActionController::Base.helpers_path = File.expand_path("../fixtures/helpers", __dir__)
@@ -102,16 +104,16 @@ class HelperTest < ActiveSupport::TestCase
   class TestController < ActionController::Base
     attr_accessor :delegate_attr
     def delegate_method() end
+    def delegate_method_arg(arg); arg; end
+    def delegate_method_kwarg(hi:); hi; end
   end
 
   def setup
     # Increment symbol counter.
-    @symbol = (@@counter ||= "A0").succ!.dup
+    @symbol = (@@counter ||= "A0").succ.dup
 
     # Generate new controller class.
-    controller_class_name = "Helper#{@symbol}Controller"
-    eval("class #{controller_class_name} < TestController; end")
-    @controller_class = self.class.const_get(controller_class_name)
+    @controller_class = Class.new(TestController)
 
     # Set default test helper.
     self.test_helper = LocalAbcHelper
@@ -126,6 +128,29 @@ class HelperTest < ActiveSupport::TestCase
   def test_helper_method
     assert_nothing_raised { @controller_class.helper_method :delegate_method }
     assert_includes master_helper_methods, :delegate_method
+  end
+
+  def test_helper_method_arg
+    assert_nothing_raised { @controller_class.helper_method :delegate_method_arg }
+    assert_equal({ hi: :there }, @controller_class.new.helpers.delegate_method_arg({ hi: :there }))
+  end
+
+  def test_helper_method_arg_does_not_call_to_hash
+    assert_nothing_raised { @controller_class.helper_method :delegate_method_arg }
+
+    my_class = Class.new do
+      def to_hash
+        { hi: :there }
+      end
+    end.new
+
+    assert_equal(my_class, @controller_class.new.helpers.delegate_method_arg(my_class))
+  end
+
+  def test_helper_method_kwarg
+    assert_nothing_raised { @controller_class.helper_method :delegate_method_kwarg }
+
+    assert_equal(:there, @controller_class.new.helpers.delegate_method_kwarg(hi: :there))
   end
 
   def test_helper_attr
@@ -148,8 +173,8 @@ class HelperTest < ActiveSupport::TestCase
   end
 
   def test_default_helpers_only
-    assert_equal [JustMeHelper], JustMeController._helpers.ancestors.reject(&:anonymous?)
-    assert_equal [MeTooHelper, JustMeHelper], MeTooController._helpers.ancestors.reject(&:anonymous?)
+    assert_equal %w[JustMeHelper], JustMeController._helpers.ancestors.reject(&:anonymous?).map(&:to_s)
+    assert_equal %w[MeTooController::HelperMethods MeTooHelper JustMeHelper], MeTooController._helpers.ancestors.reject(&:anonymous?).map(&:to_s)
   end
 
   def test_base_helper_methods_after_clear_helpers

@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 ActiveRecord::Schema.define do
-
   enable_extension!("uuid-ossp", ActiveRecord::Base.connection)
   enable_extension!("pgcrypto",  ActiveRecord::Base.connection) if ActiveRecord::Base.connection.supports_pgcrypto_uuid?
 
@@ -108,5 +107,19 @@ _SQL
   create_table :uuid_items, force: true, id: false do |t|
     t.uuid :uuid, primary_key: true, **uuid_default
     t.string :title
+  end
+
+  if supports_partitioned_indexes?
+    create_table(:measurements, id: false, force: true, options: "PARTITION BY LIST (city_id)") do |t|
+      t.string :city_id, null: false
+      t.date :logdate, null: false
+      t.integer :peaktemp
+      t.integer :unitsales
+      t.index [:logdate, :city_id], unique: true
+    end
+    create_table(:measurements_toronto, id: false, force: true,
+                                        options: "PARTITION OF measurements FOR VALUES IN (1)")
+    create_table(:measurements_concepcion, id: false, force: true,
+                                           options: "PARTITION OF measurements FOR VALUES IN (2)")
   end
 end

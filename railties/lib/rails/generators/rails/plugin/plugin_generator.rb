@@ -1,5 +1,6 @@
-require "active_support/core_ext/hash/slice"
-require_relative "../app/app_generator"
+# frozen_string_literal: true
+
+require "rails/generators/rails/app/app_generator"
 require "date"
 
 module Rails
@@ -56,6 +57,12 @@ module Rails
       template "gitignore", ".gitignore"
     end
 
+    def version_control
+      if !options[:skip_git] && !options[:pretend]
+        run "git init", capture: options[:quiet], abort_on_failure: false
+      end
+    end
+
     def lib
       template "lib/%namespaced_name%.rb"
       template "lib/tasks/%namespaced_name%_tasks.rake"
@@ -76,8 +83,8 @@ module Rails
       template "test/test_helper.rb"
       template "test/%namespaced_name%_test.rb"
       append_file "Rakefile", <<-EOF
-#{rakefile_test_tasks}
 
+#{rakefile_test_tasks}
 task default: :test
       EOF
       if engine?
@@ -86,18 +93,19 @@ task default: :test
     end
 
     PASSTHROUGH_OPTIONS = [
-      :skip_active_record, :skip_action_mailer, :skip_javascript, :skip_sprockets, :database,
-      :javascript, :quiet, :pretend, :force, :skip
+      :skip_active_record, :skip_active_storage, :skip_action_mailer, :skip_javascript, :skip_action_cable, :skip_sprockets, :database,
+      :api, :quiet, :pretend, :skip
     ]
 
     def generate_test_dummy(force = false)
-      opts = (options || {}).slice(*PASSTHROUGH_OPTIONS)
+      opts = (options.dup || {}).keep_if { |k, _| PASSTHROUGH_OPTIONS.map(&:to_s).include?(k) }
       opts[:force] = force
       opts[:skip_bundle] = true
-      opts[:api] = options.api?
       opts[:skip_listen] = true
       opts[:skip_git] = true
       opts[:skip_turbolinks] = true
+      opts[:skip_webpack_install] = true
+      opts[:dummy_app] = true
 
       invoke Rails::Generators::AppGenerator,
         [ File.expand_path(dummy_path, destination_root) ], opts
@@ -112,15 +120,15 @@ task default: :test
     end
 
     def test_dummy_assets
-      template "rails/javascripts.js",    "#{dummy_path}/app/assets/javascripts/application.js", force: true
+      template "rails/javascripts.js",    "#{dummy_path}/app/javascript/packs/application.js", force: true
       template "rails/stylesheets.css",   "#{dummy_path}/app/assets/stylesheets/application.css", force: true
       template "rails/dummy_manifest.js", "#{dummy_path}/app/assets/config/manifest.js", force: true
     end
 
     def test_dummy_clean
       inside dummy_path do
+        remove_file ".ruby-version"
         remove_file "db/seeds.rb"
-        remove_file "doc"
         remove_file "Gemfile"
         remove_file "lib/tasks"
         remove_file "public/robots.txt"
@@ -143,17 +151,6 @@ task default: :test
       end
     end
 
-    def javascripts
-      return if options.skip_javascript?
-
-      if mountable?
-        template "rails/javascripts.js",
-                 "app/assets/javascripts/#{namespaced_name}/application.js"
-      elsif full?
-        empty_directory_with_keep_file "app/assets/javascripts/#{namespaced_name}"
-      end
-    end
-
     def bin(force = false)
       bin_file = engine? ? "bin/rails.tt" : "bin/test.tt"
       template bin_file, force: force do |content|
@@ -167,7 +164,7 @@ task default: :test
 
       gemfile_in_app_path = File.join(rails_app_path, "Gemfile")
       if File.exist? gemfile_in_app_path
-        entry = "gem '#{name}', path: '#{relative_path}'"
+        entry = "\ngem '#{name}', path: '#{relative_path}'"
         append_file gemfile_in_app_path, entry
       end
     end
@@ -213,6 +210,7 @@ task default: :test
         build(:license)
         build(:gitignore) unless options[:skip_git]
         build(:gemfile)   unless options[:skip_gemfile]
+        build(:version_control)
       end
 
       def create_app_files
@@ -233,10 +231,6 @@ task default: :test
 
       def create_public_stylesheets_files
         build(:stylesheets) unless api?
-      end
-
-      def create_javascript_files
-        build(:javascripts) unless api?
       end
 
       def create_bin_files
@@ -262,12 +256,6 @@ task default: :test
 
       public_task :apply_rails_template
 
-      def run_after_bundle_callbacks
-        @after_bundle_callbacks.each do |callback|
-          callback.call
-        end
-      end
-
       def name
         @name ||= begin
           # same as ActiveSupport::Inflector#underscore except not replacing '-'
@@ -289,7 +277,6 @@ task default: :test
       end
 
     private
-
       def create_dummy_app(path = nil)
         dummy_path(path) if path
 
@@ -344,9 +331,9 @@ task default: :test
       def wrap_in_modules(unwrapped_code)
         unwrapped_code = "#{unwrapped_code}".strip.gsub(/\s$\n/, "")
         modules.reverse.inject(unwrapped_code) do |content, mod|
-          str = "module #{mod}\n"
-          str += content.lines.map { |line| "  #{line}" }.join
-          str += content.present? ? "\nend" : "end"
+          str = +"module #{mod}\n"
+          str << content.lines.map { |line| "  #{line}" }.join
+          str << (content.present? ? "\nend" : "end")
         end
       end
 
@@ -381,11 +368,11 @@ task default: :test
       end
 
       def valid_const?
-        if original_name =~ /-\d/
+        if /-\d/.match?(original_name)
           raise Error, "Invalid plugin name #{original_name}. Please give a name which does not contain a namespace starting with numeric characters."
-        elsif original_name =~ /[^\w-]+/
+        elsif /[^\w-]+/.match?(original_name)
           raise Error, "Invalid plugin name #{original_name}. Please give a name which uses only alphabetic, numeric, \"_\" or \"-\" characters."
-        elsif camelized =~ /^\d/
+        elsif /^\d/.match?(camelized)
           raise Error, "Invalid plugin name #{original_name}. Please give a name which does not start with numbers."
         elsif RESERVED_NAMES.include?(name)
           raise Error, "Invalid plugin name #{original_name}. Please give a " \

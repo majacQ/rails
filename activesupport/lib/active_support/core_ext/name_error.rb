@@ -10,7 +10,12 @@ class NameError
   #   end
   #   # => "HelloWorld"
   def missing_name
-    if /undefined local variable or method/ !~ message
+    # Since ruby v2.3.0 `did_you_mean` gem is loaded by default.
+    # It extends NameError#message with spell corrections which are SLOW.
+    # We should use original_message message instead.
+    message = respond_to?(:original_message) ? original_message : self.message
+
+    unless /undefined local variable or method/.match?(message)
       $1 if /((::)?([A-Z]\w*)(::[A-Z]\w*)*)$/ =~ message
     end
   end

@@ -1,95 +1,171 @@
-*   Support `-` as a platform-agnostic way to run a script from stdin with
-    `rails runner`
+*   `rails stats` will now count TypeScript files toward JavaScript stats.
 
-    *Cody Cutrer*
+    *Joshua Cody*
 
-*   Add `bootsnap` to default `Gemfile`.
+*   Run `git init` when generating plugins.
 
-    *Burke Libbey*
+    Opt out with `--skip-git`.
 
-*   Properly expand shortcuts for environment's name running the `console`
-    and `dbconsole` commands.
+    *OKURA Masafumi*
 
-    *Robin Dupret*
+*   Add benchmark generator.
 
-*   Passing the environment's name as a regular argument to the
-    `rails dbconsole` and `rails console` commands is deprecated.
-    The `-e` option should be used instead.
+    Introduce benchmark generator to benchmark Rails applications.
+
+      `rails generate benchmark opt_compare`
+
+    This creates a benchmark file that uses [`benchmark-ips`](https://github.com/evanphx/benchmark-ips).
+    By default, two code blocks can be benchmarked using the `before` and `after` reports.
+
+    You can run the generated benchmark file using:
+      `ruby script/benchmarks/opt_compare.rb`
+
+    *Kevin Jalbert*, *Gannon McGibbon*
+
+*   Cache compiled view templates when running tests by default.
+
+    When generating a new app without `--skip-spring`, caching classes is
+    disabled in `environments/test.rb`. This implicitly disables caching
+    view templates too. This change will enable view template caching by
+    adding this to the generated `environments/test.rb`:
+
+    ```ruby
+    config.action_view.cache_template_loading = true
+    ```
+
+    *Jorge Manrubia*
+
+*   Introduce middleware move operations.
+
+    With this change, you no longer need to delete and reinsert a middleware to
+    move it from one place to another in the stack:
+
+    ```ruby
+    config.middleware.move_before ActionDispatch::Flash, Magical::Unicorns
+    ```
+
+    This will move the `Magical::Unicorns` middleware before
+    `ActionDispatch::Flash`. You can also move it after with:
+
+    ```ruby
+    config.middleware.move_after ActionDispatch::Flash, Magical::Unicorns
+    ```
+
+    *Genadi Samokovarov*
+
+*   Generators that inherit from NamedBase respect `--force` option.
+
+    *Josh Brody*
+
+*   Allow configuration of eager_load behaviour for rake environment:
+
+        config.rake_eager_load
+
+    Defaults to `false` as per previous behaviour.
+
+    *Thierry Joyal*
+
+*   Ensure Rails migration generator respects system-wide primary key config.
+
+    When rails is configured to use a specific primary key type:
+
+    ```ruby
+    config.generators do |g|
+      g.orm :active_record, primary_key_type: :uuid
+    end
+    ```
 
     Previously:
 
-        $ bin/rails dbconsole production
+    ```
+    $ bin/rails g migration add_location_to_users location:references
+    ```
 
-    Now:
+    The references line in the migration would not have `type: :uuid`.
+    This change causes the type to be applied appropriately.
 
-        $ bin/rails dbconsole -e production
+    *Louis-Michel Couture*, *Dermot Haughey*
 
-    *Robin Dupret*, *Kasper Timm Hansen*
+*   Deprecate `Rails::DBConsole#config`.
 
-*   Allow to pass a custom connection name to the `rails dbconsole`
-    command when using a 3-level database configuration.
+    `Rails::DBConsole#config` is deprecated without replacement. Use `Rails::DBConsole.db_config.configuration_hash` instead.
 
-        $ bin/rails dbconsole -c replica
+    *Eileen M. Uchitelle*, *John Crepezzi*
 
-    *Robin Dupret*, *Jeremy Daer*
+*   `Rails.application.config_for` merges shared configuration deeply.
 
-*   Skip unused components when running `bin/rails app:update`.
+    ```yaml
+    # config/example.yml
+    shared:
+      foo:
+        bar:
+          baz: 1
+    development:
+      foo:
+        bar:
+          qux: 2
+    ```
 
-    If the initial app generation skipped Action Cable, Active Record etc.,
-    the update task honors those skips too.
+    ```ruby
+    # Previously
+    Rails.application.config_for(:example)[:foo][:bar] #=> { qux: 2 }
 
-    *Yuji Yaginuma*
+    # Now
+    Rails.application.config_for(:example)[:foo][:bar] #=> { baz: 1, qux: 2 }
+    ```
 
-*   Make Rails' test runner work better with minitest plugins.
+    *Yuhei Kiriyama*
 
-    By demoting the Rails test runner to just another minitest plugin —
-    and thereby not eager loading it — we can co-exist much better with
-    other minitest plugins such as pride and minitest-focus.
+*   Remove access to values in nested hashes returned by `Rails.application.config_for` via String keys.
 
-    *Kasper Timm Hansen*
+    ```yaml
+    # config/example.yml
+    development:
+      options:
+        key: value
+    ```
 
-*   Load environment file in `dbconsole` command.
+    ```ruby
+    Rails.application.config_for(:example).options
+    ```
 
-    Fixes #29717
+    This used to return a Hash on which you could access values with String keys. This was deprecated in 6.0, and now doesn't work anymore.
 
-    *Yuji Yaginuma*
+    *Étienne Barrié*
 
-*   Add `rails secrets:show` command.
+*   Configuration files for environments (`config/environments/*.rb`) are
+    now able to modify `autoload_paths`, `autoload_once_paths`, and
+    `eager_load_paths`.
 
-    *Yuji Yaginuma*
+    As a consequence, applications cannot autoload within those files. Before, they technically could, but changes in autoloaded classes or modules had no effect anyway in the configuration because reloading does not reboot.
 
-*   Allow mounting the same engine several times in different locations.
+    Ways to use application code in these files:
 
-    Fixes #20204.
+    * Define early in the boot process a class that is not reloadable, from which the application takes configuration values that get passed to the framework.
 
-    *David Rodríguez*
+        ```ruby
+        # In config/application.rb, for example.
+        require "#{Rails.root}/lib/my_app/config"
 
-*   Clear screenshot files in `tmp:clear` task.
+        # In config/environments/development.rb, for example.
+        config.foo = MyApp::Config.foo
+        ```
 
-    *Yuji Yaginuma*
+    * If the class has to be reloadable, then wrap the configuration code in a `to_prepare` block:
 
-*   Add `railtie.rb` to the plugin generator
+        ```ruby
+        config.to_prepare do
+          config.foo = MyModel.foo
+        end
+        ```
 
-    *Tsukuru Tanimichi*
+      That assigns the latest `MyModel.foo` to `config.foo` when the application boots, and each time there is a reload. But whether that has an effect or not depends on the configuration point, since it is not uncommon for engines to read the application configuration during initialization and set their own state from them. That process happens only on boot, not on reloads, and if that is how `config.foo` worked, resetting it would have no effect in the state of the engine.
 
-*   Deprecate `capify!` method in generators and templates.
+    *Allen Hsu* & *Xavier Noria*
 
-    *Yuji Yaginuma*
+*   Support using environment variable to set pidfile.
 
-*   Allow irb options to be passed from `rails console` command.
-
-    Fixes #28988.
-
-    *Yuji Yaginuma*
-
-*   Added a shared section to `config/database.yml` that will be loaded for all environments.
-
-    *Pierre Schambacher*
-
-*   Namespace error pages' CSS selectors to stop the styles from bleeding into other pages
-    when using Turbolinks.
-
-    *Jan Krutisch*
+    *Ben Thorner*
 
 
-Please check [5-1-stable](https://github.com/rails/rails/blob/5-1-stable/railties/CHANGELOG.md) for previous changes.
+Please check [6-0-stable](https://github.com/rails/rails/blob/6-0-stable/railties/CHANGELOG.md) for previous changes.
