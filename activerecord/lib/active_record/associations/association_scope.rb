@@ -26,7 +26,9 @@ module ActiveRecord
         chain = get_chain(reflection, association, scope.alias_tracker)
 
         scope.extending! reflection.extensions
-        add_constraints(scope, owner, chain)
+        scope = add_constraints(scope, owner, chain)
+        scope.limit!(1) unless reflection.collection?
+        scope
       end
 
       def self.get_bind_values(owner, chain)
@@ -50,7 +52,7 @@ module ActiveRecord
         attr_reader :value_transformation
 
         def join(table, constraint)
-          table.create_join(table, table.create_on(constraint))
+          table.create_join(table, table.create_on(constraint), Arel::Nodes::LeadingJoin)
         end
 
         def last_chain_scope(scope, reflection, owner)
@@ -132,6 +134,12 @@ module ActiveRecord
 
               if scope_chain_item == chain_head.scope
                 scope.merge! item.except(:where, :includes, :unscope, :order)
+              elsif !item.references_values.empty?
+                join_dependency = item.construct_join_dependency(
+                  item.eager_load_values | item.includes_values, Arel::Nodes::OuterJoin
+                )
+                scope.joins!(*item.joins_values, join_dependency)
+                scope.left_outer_joins!(*item.left_outer_joins_values)
               end
 
               reflection.all_includes do

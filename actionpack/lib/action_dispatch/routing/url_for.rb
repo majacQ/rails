@@ -107,6 +107,7 @@ module ActionDispatch
         @_routes = nil
         super
       end
+      ruby2_keywords(:initialize) if respond_to?(:ruby2_keywords, true)
 
       # Hook overridden in controller to add request information
       # with +default_url_options+. Application logic should not
@@ -133,6 +134,7 @@ module ActionDispatch
       #   <tt>ActionDispatch::Http::URL.tld_length</tt>, which in turn defaults to 1.
       # * <tt>:port</tt> - Optionally specify the port to connect to.
       # * <tt>:anchor</tt> - An anchor name to be appended to the path.
+      # * <tt>:params</tt> - The query parameters to be appended to the path.
       # * <tt>:trailing_slash</tt> - If true, adds a trailing slash, as in "/archive/2009/"
       # * <tt>:script_name</tt> - Specifies application path relative to domain root. If provided, prepends application path.
       #
@@ -204,7 +206,7 @@ module ActionDispatch
       #   end
       #
       # This maintains the context of the original caller on
-      # whether to return a path or full url, e.g:
+      # whether to return a path or full URL, e.g:
       #
       #   threadable_path(threadable)  # => "/buckets/1"
       #   threadable_url(threadable)   # => "http://example.com/buckets/1"
@@ -214,13 +216,11 @@ module ActionDispatch
       end
 
       protected
-
         def optimize_routes_generation?
           _routes.optimize_routes_generation? && default_url_options.empty?
         end
 
       private
-
         def _with_routes(routes) # :doc:
           old_routes, @_routes = @_routes, routes
           yield

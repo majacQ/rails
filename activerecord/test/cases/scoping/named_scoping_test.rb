@@ -50,7 +50,7 @@ class NamedScopingTest < ActiveRecord::TestCase
 
   def test_calling_merge_at_first_in_scope
     Topic.class_eval do
-      scope :calling_merge_at_first_in_scope, Proc.new { merge(Topic.replied) }
+      scope :calling_merge_at_first_in_scope, Proc.new { merge(Topic.unscoped.replied) }
     end
     assert_equal Topic.calling_merge_at_first_in_scope.to_a, Topic.replied.to_a
   end
@@ -62,6 +62,11 @@ class NamedScopingTest < ActiveRecord::TestCase
       scope :to,    Proc.new { where("written_on <= ?", Time.now) }
     end
     assert_equal klazz.to.since.to_a, klazz.since.to.to_a
+  end
+
+  def test_define_scope_for_reserved_words
+    assert Topic.true.all?(&:approved?), "all objects should be approved"
+    assert Topic.false.none?(&:approved?), "all objects should not be approved"
   end
 
   def test_scope_should_respond_to_own_methods_and_methods_of_the_proxy
@@ -86,7 +91,7 @@ class NamedScopingTest < ActiveRecord::TestCase
   def test_scopes_are_composable
     assert_equal((approved = Topic.all.merge!(where: { approved: true }).to_a), Topic.approved)
     assert_equal((replied = Topic.all.merge!(where: "replies_count > 0").to_a), Topic.replied)
-    assert !(approved == replied)
+    assert_not (approved == replied)
     assert_not_empty (approved & replied)
 
     assert_equal approved & replied, Topic.approved.replied
@@ -111,6 +116,18 @@ class NamedScopingTest < ActiveRecord::TestCase
     objects = Topic.with_object
     assert_operator objects.length, :>, 0
     assert objects.all?(&:approved?), "all objects should be approved"
+  end
+
+  def test_scope_with_kwargs
+    # Explicit true
+    topics = Topic.with_kwargs(approved: true)
+    assert_operator topics.length, :>, 0
+    assert topics.all?(&:approved?), "all objects should be approved"
+
+    # No arguments
+    topics = Topic.with_kwargs()
+    assert_operator topics.length, :>, 0
+    assert topics.none?(&:approved?), "all objects should not be approved"
   end
 
   def test_has_many_associations_have_access_to_scopes
@@ -447,6 +464,17 @@ class NamedScopingTest < ActiveRecord::TestCase
     assert_equal [posts(:sti_comments)], Post.with_special_comments.with_post(4).to_a.uniq
   end
 
+  def test_class_method_in_scope
+    assert_deprecated do
+      assert_equal [topics(:second)], topics(:first).approved_replies.ordered
+    end
+  end
+
+  def test_nested_scoping
+    expected = Reply.approved
+    assert_equal expected.to_a, Topic.rejected.nested_scoping(expected)
+  end
+
   def test_scopes_batch_finders
     assert_equal 4, Topic.approved.count
 
@@ -481,8 +509,9 @@ class NamedScopingTest < ActiveRecord::TestCase
 
     [:public_method, :protected_method, :private_method].each do |reserved_method|
       assert Topic.respond_to?(reserved_method, true)
-      ActiveRecord::Base.logger.expects(:warn)
-      silence_warnings { Topic.scope(reserved_method, -> {}) }
+      assert_called(ActiveRecord::Base.logger, :warn) do
+        silence_warnings { Topic.scope(reserved_method, -> { }) }
+      end
     end
   end
 
@@ -589,5 +618,15 @@ class NamedScopingTest < ActiveRecord::TestCase
     assert_not_predicate Topic, :one?
     Topic.create!
     assert_predicate Topic, :one?
+  end
+
+  def test_scope_with_annotation
+    Topic.class_eval do
+      scope :including_annotate_in_scope, Proc.new { annotate("from-scope") }
+    end
+
+    assert_sql(%r{/\* from-scope \*/}) do
+      assert Topic.including_annotate_in_scope.to_a, Topic.all.to_a
+    end
   end
 end

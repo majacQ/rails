@@ -14,7 +14,7 @@ class QueuingTest < ActiveSupport::TestCase
   end
 
   test "should not run jobs queued on a non-listening queue" do
-    skip if adapter_is?(:inline, :async, :sucker_punch, :que)
+    skip if adapter_is?(:inline, :async, :sucker_punch)
     old_queue = TestJob.queue_name
 
     begin
@@ -60,29 +60,25 @@ class QueuingTest < ActiveSupport::TestCase
   end
 
   test "should not run job enqueued in the future" do
-    begin
-      TestJob.set(wait: 10.minutes).perform_later @id
-      wait_for_jobs_to_finish_for(5.seconds)
-      assert_not job_executed
-    rescue NotImplementedError
-      skip
-    end
+    TestJob.set(wait: 10.minutes).perform_later @id
+    wait_for_jobs_to_finish_for(5.seconds)
+    assert_not job_executed
+  rescue NotImplementedError
+    skip
   end
 
   test "should run job enqueued in the future at the specified time" do
-    begin
-      TestJob.set(wait: 5.seconds).perform_later @id
-      wait_for_jobs_to_finish_for(2.seconds)
-      assert_not job_executed
-      wait_for_jobs_to_finish_for(10.seconds)
-      assert job_executed
-    rescue NotImplementedError
-      skip
-    end
+    TestJob.set(wait: 5.seconds).perform_later @id
+    wait_for_jobs_to_finish_for(2.seconds)
+    assert_not job_executed
+    wait_for_jobs_to_finish_for(10.seconds)
+    assert job_executed
+  rescue NotImplementedError
+    skip
   end
 
   test "should supply a provider_job_id when available for immediate jobs" do
-    skip unless adapter_is?(:async, :delayed_job, :sidekiq, :qu, :que, :queue_classic)
+    skip unless adapter_is?(:async, :delayed_job, :sidekiq, :que, :queue_classic)
     test_job = TestJob.perform_later @id
     assert test_job.provider_job_id, "Provider job id should be set by provider"
   end
@@ -132,6 +128,18 @@ class QueuingTest < ActiveSupport::TestCase
     wait_until = Time.now + 3.seconds
     TestJob.set(wait_until: wait_until, priority: 20).perform_later "#{@id}.1"
     TestJob.set(wait_until: wait_until, priority: 10).perform_later "#{@id}.2"
+    wait_for_jobs_to_finish_for(10.seconds)
+    assert job_executed "#{@id}.1"
+    assert job_executed "#{@id}.2"
+    assert job_executed_at("#{@id}.2") < job_executed_at("#{@id}.1")
+  end
+
+  test "should run job with higher priority first in Backburner" do
+    skip unless adapter_is?(:backburner)
+
+    jobs_manager.tube.pause(3)
+    TestJob.set(priority: 20).perform_later "#{@id}.1"
+    TestJob.set(priority: 10).perform_later "#{@id}.2"
     wait_for_jobs_to_finish_for(10.seconds)
     assert job_executed "#{@id}.1"
     assert job_executed "#{@id}.2"

@@ -8,6 +8,7 @@ require "models/zine"
 require "models/club"
 require "models/sponsor"
 require "models/rating"
+require "models/post"
 require "models/comment"
 require "models/car"
 require "models/bulb"
@@ -60,6 +61,14 @@ class AutomaticInverseFindingTests < ActiveRecord::TestCase
 
     assert comment_reflection.has_inverse?, "The Comment reflection should have an inverse"
     assert_equal rating_reflection, comment_reflection.inverse_of, "The Comment reflection's inverse should be the Rating reflection"
+  end
+
+  def test_has_many_and_belongs_to_should_find_inverse_automatically_for_extension_block
+    comment_reflection = Comment.reflect_on_association(:post)
+    post_reflection = Post.reflect_on_association(:comments)
+
+    assert_predicate post_reflection, :has_inverse?
+    assert_equal comment_reflection, post_reflection.inverse_of
   end
 
   def test_has_many_and_belongs_to_should_find_inverse_automatically_for_sti
@@ -119,11 +128,11 @@ class AutomaticInverseFindingTests < ActiveRecord::TestCase
   def test_polymorphic_and_has_many_through_relationships_should_not_have_inverses
     sponsor_reflection = Sponsor.reflect_on_association(:sponsorable)
 
-    assert !sponsor_reflection.has_inverse?, "A polymorphic association should not find an inverse automatically"
+    assert_not sponsor_reflection.has_inverse?, "A polymorphic association should not find an inverse automatically"
 
     club_reflection = Club.reflect_on_association(:members)
 
-    assert !club_reflection.has_inverse?, "A has_many_through association should not find an inverse automatically"
+    assert_not club_reflection.has_inverse?, "A has_many_through association should not find an inverse automatically"
   end
 
   def test_polymorphic_has_one_should_find_inverse_automatically
@@ -536,13 +545,6 @@ class InverseHasManyTests < ActiveRecord::TestCase
       assert_predicate Man.joins(:interests).includes(:interests).first.interests, :any?
     end
   end
-
-  def reset_callbacks(target, type)
-    old_callbacks = target.send(:get_callbacks, type).deep_dup
-    yield
-  ensure
-    target.send(:set_callbacks, type, old_callbacks) if old_callbacks
-  end
 end
 
 class InverseBelongsToTests < ActiveRecord::TestCase
@@ -693,6 +695,17 @@ class InversePolymorphicBelongsToTests < ActiveRecord::TestCase
     new_inversed_man = face.man
 
     assert_equal old_inversed_man.object_id, new_inversed_man.object_id
+  end
+
+  def test_inversed_instance_should_load_after_autosave_if_it_is_not_already_loaded
+    man = Man.create!
+    man.create_autosave_face!
+
+    man.autosave_face.reload # clear cached load of autosave_man
+    man.autosave_face.description = "new description"
+    man.save!
+
+    assert_not_nil man.autosave_face.autosave_man
   end
 
   def test_should_not_try_to_set_inverse_instances_when_the_inverse_is_a_has_many

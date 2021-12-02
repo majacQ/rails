@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "active_support/core_ext/string/filters"
-require "concurrent/map"
 
 module ActiveRecord
   # = Active Record Reflection
@@ -13,33 +12,37 @@ module ActiveRecord
       class_attribute :aggregate_reflections, instance_writer: false, default: {}
     end
 
-    def self.create(macro, name, scope, options, ar)
-      klass = \
-        case macro
-        when :composed_of
-          AggregateReflection
-        when :has_many
-          HasManyReflection
-        when :has_one
-          HasOneReflection
-        when :belongs_to
-          BelongsToReflection
-        else
-          raise "Unsupported Macro: #{macro}"
+    class << self
+      def create(macro, name, scope, options, ar)
+        reflection = reflection_class_for(macro).new(name, scope, options, ar)
+        options[:through] ? ThroughReflection.new(reflection) : reflection
+      end
+
+      def add_reflection(ar, name, reflection)
+        ar.clear_reflections_cache
+        name = -name.to_s
+        ar._reflections = ar._reflections.except(name).merge!(name => reflection)
+      end
+
+      def add_aggregate_reflection(ar, name, reflection)
+        ar.aggregate_reflections = ar.aggregate_reflections.merge(-name.to_s => reflection)
+      end
+
+      private
+        def reflection_class_for(macro)
+          case macro
+          when :composed_of
+            AggregateReflection
+          when :has_many
+            HasManyReflection
+          when :has_one
+            HasOneReflection
+          when :belongs_to
+            BelongsToReflection
+          else
+            raise "Unsupported Macro: #{macro}"
+          end
         end
-
-      reflection = klass.new(name, scope, options, ar)
-      options[:through] ? ThroughReflection.new(reflection) : reflection
-    end
-
-    def self.add_reflection(ar, name, reflection)
-      ar.clear_reflections_cache
-      name = name.to_s
-      ar._reflections = ar._reflections.except(name).merge!(name => reflection)
-    end
-
-    def self.add_aggregate_reflection(ar, name, reflection)
-      ar.aggregate_reflections = ar.aggregate_reflections.merge(name.to_s => reflection)
     end
 
     # \Reflection enables the ability to examine the associations and aggregations of
@@ -174,20 +177,7 @@ module ActiveRecord
         scope ? [scope] : []
       end
 
-      def build_join_constraint(table, foreign_table)
-        key         = join_keys.key
-        foreign_key = join_keys.foreign_key
-
-        constraint = table[key].eq(foreign_table[foreign_key])
-
-        if klass.finder_needs_type_condition?
-          table.create_and([constraint, klass.send(:type_condition, table)])
-        else
-          constraint
-        end
-      end
-
-      def join_scope(table, foreign_klass)
+      def join_scope(table, foreign_table, foreign_klass)
         predicate_builder = predicate_builder(table)
         scope_chain_items = join_scopes(table, predicate_builder)
         klass_scope       = klass_join_scope(table, predicate_builder)
@@ -197,11 +187,22 @@ module ActiveRecord
         end
 
         scope_chain_items.inject(klass_scope, &:merge!)
+
+        key         = join_keys.key
+        foreign_key = join_keys.foreign_key
+
+        klass_scope.where!(table[key].eq(foreign_table[foreign_key]))
+
+        if klass.finder_needs_type_condition?
+          klass_scope.where!(klass.send(:type_condition, table))
+        end
+
+        klass_scope
       end
 
-      def join_scopes(table, predicate_builder) # :nodoc:
+      def join_scopes(table, predicate_builder, klass = self.klass) # :nodoc:
         if scope
-          [scope_for(build_scope(table, predicate_builder))]
+          [scope_for(build_scope(table, predicate_builder, klass))]
         else
           []
         end
@@ -290,7 +291,7 @@ module ActiveRecord
         JoinKeys.new(join_primary_key(association_klass), join_foreign_key)
       end
 
-      def build_scope(table, predicate_builder = predicate_builder(table))
+      def build_scope(table, predicate_builder = predicate_builder(table), klass = self.klass)
         Relation.create(
           klass,
           table: table,
@@ -417,7 +418,7 @@ module ActiveRecord
     class AssociationReflection < MacroReflection #:nodoc:
       def compute_class(name)
         if polymorphic?
-          raise ArgumentError, "Polymorphic association does not support to compute class."
+          raise ArgumentError, "Polymorphic associations do not support computing the class."
         end
         active_record.send(:compute_type, name)
       end
@@ -430,19 +431,18 @@ module ActiveRecord
         @type         = options[:as] && (options[:foreign_type] || "#{options[:as]}_type")
         @foreign_type = options[:polymorphic] && (options[:foreign_type] || "#{name}_type")
         @constructable = calculate_constructable(macro, options)
-        @association_scope_cache = Concurrent::Map.new
 
         if options[:class_name] && options[:class_name].class == Class
           raise ArgumentError, "A class was passed to `:class_name` but we are expecting a string."
         end
       end
 
-      def association_scope_cache(conn, owner, &block)
-        key = conn.prepared_statements
+      def association_scope_cache(klass, owner, &block)
+        key = self
         if polymorphic?
           key = [key, owner._read_attribute(@foreign_type)]
         end
-        @association_scope_cache.compute_if_absent(key) { StatementCache.create(conn, &block) }
+        klass.cached_find_by_statement(key, &block)
       end
 
       def constructable? # :nodoc:
@@ -477,7 +477,7 @@ module ActiveRecord
       def check_preloadable!
         return unless scope
 
-        if scope.arity > 0
+        unless scope.arity == 0
           raise ArgumentError, <<-MSG.squish
             The association scope '#{name}' is instance dependent (the scope
             block takes an argument). Preloading instance dependent scopes is
@@ -508,7 +508,7 @@ module ActiveRecord
       # This is for clearing cache on the reflection. Useful for tests that need to compare
       # SQL queries on associations.
       def clear_association_scope_cache # :nodoc:
-        @association_scope_cache.clear
+        klass.initialize_find_by_cache
       end
 
       def nested?
@@ -590,7 +590,6 @@ module ActiveRecord
       end
 
       private
-
         def calculate_constructable(macro, options)
           true
         end
@@ -620,7 +619,7 @@ module ActiveRecord
             end
 
             if valid_inverse_reflection?(reflection)
-              return inverse_name
+              inverse_name
             end
           end
         end
@@ -704,7 +703,6 @@ module ActiveRecord
       end
 
       private
-
         def calculate_constructable(macro, options)
           !options[:through]
         end
@@ -839,8 +837,8 @@ module ActiveRecord
         source_reflection.scopes + super
       end
 
-      def join_scopes(table, predicate_builder) # :nodoc:
-        source_reflection.join_scopes(table, predicate_builder) + super
+      def join_scopes(table, predicate_builder, klass = self.klass) # :nodoc:
+        source_reflection.join_scopes(table, predicate_builder, klass) + super
       end
 
       def has_scope?
@@ -1003,9 +1001,9 @@ module ActiveRecord
         @previous_reflection = previous_reflection
       end
 
-      def join_scopes(table, predicate_builder) # :nodoc:
+      def join_scopes(table, predicate_builder, klass = self.klass) # :nodoc:
         scopes = @previous_reflection.join_scopes(table, predicate_builder) + super
-        scopes << build_scope(table, predicate_builder).instance_exec(nil, &source_type_scope)
+        scopes << build_scope(table, predicate_builder, klass).instance_exec(nil, &source_type_scope)
       end
 
       def constraints

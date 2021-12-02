@@ -24,6 +24,7 @@ module SidekiqJobsManager
     continue_read, continue_write = IO.pipe
     death_read, death_write = IO.pipe
 
+    sleep 1
     @pid = fork do
       continue_read.close
       death_write.close
@@ -36,7 +37,7 @@ module SidekiqJobsManager
       $stderr.sync = true
 
       logfile = Rails.root.join("log/sidekiq.log").to_s
-      Sidekiq::Logging.initialize_logger(logfile)
+      Sidekiq.logger = Sidekiq::Logger.new(logfile)
 
       self_read, self_write = IO.pipe
       trap "TERM" do

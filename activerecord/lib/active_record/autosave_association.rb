@@ -29,7 +29,7 @@ module ActiveRecord
   # == Callbacks
   #
   # Association with autosave option defines several callbacks on your
-  # model (before_save, after_create, after_update). Please note that
+  # model (around_save, before_save, after_create, after_update). Please note that
   # callbacks are executed in the order they were defined in
   # model. You should avoid modifying the association content, before
   # autosave callbacks are executed. Placing your callbacks after
@@ -147,9 +147,8 @@ module ActiveRecord
 
     module ClassMethods # :nodoc:
       private
-
         def define_non_cyclic_method(name, &block)
-          return if method_defined?(name)
+          return if instance_methods(false).include?(name)
           define_method(name) do |*args|
             result = true; @_already_called ||= {}
             # Loop prevention for validation of associations
@@ -181,8 +180,7 @@ module ActiveRecord
           save_method = :"autosave_associated_records_for_#{reflection.name}"
 
           if reflection.collection?
-            before_save :before_save_collection_association
-            after_save :after_save_collection_association
+            around_save :around_save_collection_association
 
             define_non_cyclic_method(save_method) { save_collection_association(reflection) }
             # Doesn't use after_save as that would save associations added in after_create/after_update twice
@@ -267,12 +265,11 @@ module ActiveRecord
     end
 
     private
-
       # Returns the record for an association collection that should be validated
       # or saved. If +autosave+ is +false+ only new records will be returned,
       # unless the parent is/was a new record itself.
       def associated_records_to_validate_or_save(association, new_record, autosave)
-        if new_record
+        if new_record || custom_validation_context?
           association && association.target
         elsif autosave
           association.target.find_all(&:changed_for_autosave?)
@@ -304,7 +301,7 @@ module ActiveRecord
       def validate_single_association(reflection)
         association = association_instance_get(reflection.name)
         record      = association && association.reader
-        association_valid?(reflection, record) if record
+        association_valid?(reflection, record) if record && (record.changed_for_autosave? || custom_validation_context?)
       end
 
       # Validate the associated records if <tt>:validate</tt> or
@@ -324,7 +321,7 @@ module ActiveRecord
       def association_valid?(reflection, record, index = nil)
         return true if record.destroyed? || (reflection.options[:autosave] && record.marked_for_destruction?)
 
-        context = validation_context unless [:create, :update].include?(validation_context)
+        context = validation_context if custom_validation_context?
 
         unless valid = record.valid?(context)
           if reflection.options[:autosave]
@@ -360,14 +357,15 @@ module ActiveRecord
         end
       end
 
-      # Is used as a before_save callback to check while saving a collection
+      # Is used as an around_save callback to check while saving a collection
       # association whether or not the parent was a new record before saving.
-      def before_save_collection_association
-        @new_record_before_save = new_record?
-      end
+      def around_save_collection_association
+        previously_new_record_before_save = (@new_record_before_save ||= false)
+        @new_record_before_save = !previously_new_record_before_save && new_record?
 
-      def after_save_collection_association
-        @new_record_before_save = false
+        yield
+      ensure
+        @new_record_before_save = previously_new_record_before_save
       end
 
       # Saves any new associated records, or all loaded autosave associations if
@@ -382,10 +380,14 @@ module ActiveRecord
         if association = association_instance_get(reflection.name)
           autosave = reflection.options[:autosave]
 
+          # By saving the instance variable in a local variable,
+          # we make the whole callback re-entrant.
+          new_record_before_save = @new_record_before_save
+
           # reconstruct the scope now that we know the owner's id
           association.reset_scope
 
-          if records = associated_records_to_validate_or_save(association, @new_record_before_save, autosave)
+          if records = associated_records_to_validate_or_save(association, new_record_before_save, autosave)
             if autosave
               records_to_destroy = records.select(&:marked_for_destruction?)
               records_to_destroy.each { |record| association.destroy(record) }
@@ -397,17 +399,22 @@ module ActiveRecord
 
               saved = true
 
-              if autosave != false && (@new_record_before_save || record.new_record?)
+              if autosave != false && (new_record_before_save || record.new_record?)
                 if autosave
                   saved = association.insert_record(record, false)
-                else
-                  association.insert_record(record) unless reflection.nested?
+                elsif !reflection.nested?
+                  association_saved = association.insert_record(record)
+
+                  if reflection.validate?
+                    errors.add(reflection.name) unless association_saved
+                    saved = association_saved
+                  end
                 end
               elsif autosave
                 saved = record.save(validate: false)
               end
 
-              raise ActiveRecord::Rollback unless saved
+              raise(RecordInvalid.new(association.owner)) unless saved
             end
           end
         end
@@ -437,7 +444,7 @@ module ActiveRecord
               unless reflection.through_reflection
                 record[reflection.foreign_key] = key
                 if inverse_reflection = reflection.inverse_of
-                  record.association(inverse_reflection.name).loaded!
+                  record.association(inverse_reflection.name).inversed_from(self)
                 end
               end
 
@@ -452,8 +459,14 @@ module ActiveRecord
       # If the record is new or it has changed, returns true.
       def record_changed?(reflection, record, key)
         record.new_record? ||
-          (record.has_attribute?(reflection.foreign_key) && record[reflection.foreign_key] != key) ||
+          association_foreign_key_changed?(reflection, record, key) ||
           record.will_save_change_to_attribute?(reflection.foreign_key)
+      end
+
+      def association_foreign_key_changed?(reflection, record, key)
+        return false if reflection.through_reflection?
+
+        record.has_attribute?(reflection.foreign_key) && record[reflection.foreign_key] != key
       end
 
       # Saves the associated record if it's new or <tt>:autosave</tt> is enabled.
@@ -482,6 +495,10 @@ module ActiveRecord
             saved if autosave
           end
         end
+      end
+
+      def custom_validation_context?
+        validation_context && [:create, :update].exclude?(validation_context)
       end
 
       def _ensure_no_duplicate_errors

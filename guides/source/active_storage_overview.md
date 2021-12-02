@@ -1,4 +1,4 @@
-**DO NOT READ THIS FILE ON GITHUB, GUIDES ARE PUBLISHED ON http://guides.rubyonrails.org.**
+**DO NOT READ THIS FILE ON GITHUB, GUIDES ARE PUBLISHED ON https://guides.rubyonrails.org.**
 
 Active Storage Overview
 =======================
@@ -36,10 +36,12 @@ files.
 ## Setup
 
 Active Storage uses two tables in your application’s database named
-`active_storage_blobs` and `active_storage_attachments`. After upgrading your
-application to Rails 5.2, run `rails active_storage:install` to generate a
-migration that creates these tables. Use `rails db:migrate` to run the
-migration.
+`active_storage_blobs` and `active_storage_attachments`. After creating a new
+application (or upgrading your application to Rails 5.2), run
+`rails active_storage:install` to generate a migration that creates these
+tables. Use `rails db:migrate` to run the migration.
+
+WARNING: `active_storage_attachments` is a polymorphic join table that stores your model's class name. If your model's class name changes, you will need to run a migration on this table to update the underlying `record_type` to your model's new class name.
 
 Declare Active Storage services in `config/storage.yml`. For each service your
 application uses, provide a name and the requisite configuration. The example
@@ -58,6 +60,8 @@ amazon:
   service: S3
   access_key_id: ""
   secret_access_key: ""
+  bucket: ""
+  region: "" # e.g. 'us-east-1'
 ```
 
 Tell Active Storage which service to use by setting
@@ -72,12 +76,20 @@ development environment, you would add the following to
 config.active_storage.service = :local
 ```
 
-To use the Amazon S3 service in production, you add the following to
+To use the S3 service in production, you add the following to
 `config/environments/production.rb`:
 
 ```ruby
 # Store files on Amazon S3.
 config.active_storage.service = :amazon
+```
+
+To use the test service when testing, you add the following to
+`config/environments/test.rb`:
+
+```ruby
+# Store uploaded files on the local file system in a temporary directory.
+config.active_storage.service = :test
 ```
 
 Continue reading for more information on the built-in service adapters (e.g.
@@ -93,9 +105,9 @@ local:
   root: <%= Rails.root.join("storage") %>
 ```
 
-### Amazon S3 Service
+### S3 Service (Amazon S3 and S3-compatible APIs)
 
-Declare an S3 service in `config/storage.yml`:
+To connect to Amazon S3, declare an S3 service in `config/storage.yml`:
 
 ```yaml
 amazon:
@@ -113,6 +125,23 @@ gem "aws-sdk-s3", require: false
 ```
 
 NOTE: The core features of Active Storage require the following permissions: `s3:ListBucket`, `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject`. If you have additional upload options configured such as setting ACLs then additional permissions may be required.
+
+NOTE: If you want to use environment variables, standard SDK configuration files, profiles,
+IAM instance profiles or task roles, you can omit the `access_key_id`, `secret_access_key`,
+and `region` keys in the example above. The S3 Service supports all of the
+authentication options described in the [AWS SDK documentation]
+(https://docs.aws.amazon.com/sdk-for-ruby/v3/developer-guide/setup-config.html).
+
+To connect to an S3-compatible object storage API such as Digital Ocean Spaces, provide the `endpoint`:
+
+```yaml
+digitalocean:
+  service: S3
+  endpoint: https://nyc3.digitaloceanspaces.com
+  access_key_id: ...
+  secret_access_key: ...
+  # ...and other options
+```
 
 ### Microsoft Azure Storage Service
 
@@ -153,7 +182,7 @@ google:
     type: "service_account"
     project_id: ""
     private_key_id: <%= Rails.application.credentials.dig(:gcs, :private_key_id) %>
-    private_key: <%= Rails.application.credentials.dig(:gcs, :private_key) %>
+    private_key: <%= Rails.application.credentials.dig(:gcs, :private_key).dump %>
     client_email: ""
     client_id: ""
     auth_uri: "https://accounts.google.com/o/oauth2/auth"
@@ -167,7 +196,7 @@ google:
 Add the [`google-cloud-storage`](https://github.com/GoogleCloudPlatform/google-cloud-ruby/tree/master/google-cloud-storage) gem to your `Gemfile`:
 
 ```ruby
-gem "google-cloud-storage", "~> 1.8", require: false
+gem "google-cloud-storage", "~> 1.11", require: false
 ```
 
 ### Mirror Service
@@ -204,6 +233,8 @@ production:
 
 NOTE: Files are served from the primary service.
 
+NOTE: This is not compatible with the [direct uploads](#direct-uploads) feature.
+
 Attaching Files to Records
 --------------------------
 
@@ -223,6 +254,10 @@ end
 
 You can create a user with an avatar:
 
+```erb
+<%= form.file_field :avatar %>
+```
+
 ```ruby
 class SignupController < ApplicationController
   def create
@@ -241,13 +276,13 @@ end
 Call `avatar.attach` to attach an avatar to an existing user:
 
 ```ruby
-Current.user.avatar.attach(params[:avatar])
+user.avatar.attach(params[:avatar])
 ```
 
 Call `avatar.attached?` to determine whether a particular user has an avatar:
 
 ```ruby
-Current.user.avatar.attached?
+user.avatar.attached?
 ```
 
 ### `has_many_attached`
@@ -292,6 +327,42 @@ Call `images.attached?` to determine whether a particular message has any images
 @message.images.attached?
 ```
 
+### Attaching File/IO Objects
+
+Sometimes you need to attach a file that doesn’t arrive via an HTTP request.
+For example, you may want to attach a file you generated on disk or downloaded
+from a user-submitted URL. You may also want to attach a fixture file in a
+model test. To do that, provide a Hash containing at least an open IO object
+and a filename:
+
+```ruby
+@message.image.attach(io: File.open('/path/to/file'), filename: 'file.pdf')
+```
+
+When possible, provide a content type as well. Active Storage attempts to
+determine a file’s content type from its data. It falls back to the content
+type you provide if it can’t do that.
+
+```ruby
+@message.image.attach(io: File.open('/path/to/file'), filename: 'file.pdf', content_type: 'application/pdf')
+```
+
+You can bypass the content type inference from the data by passing in
+`identify: false` along with the `content_type`.
+
+```ruby
+@message.image.attach(
+  io: File.open('/path/to/file'),
+  filename: 'file.pdf',
+  content_type: 'application/pdf',
+  identify: false
+)
+```
+
+If you don’t provide a content type and Active Storage can’t determine the
+file’s content type automatically, it defaults to application/octet-stream.
+
+
 Removing Files
 --------------
 
@@ -327,25 +398,69 @@ helper allows you to set the disposition.
 rails_blob_path(user.avatar, disposition: "attachment")
 ```
 
+If you need to create a link from outside of controller/view context (Background
+jobs, Cronjobs, etc.), you can access the rails_blob_path like this:
+
+```
+Rails.application.routes.url_helpers.rails_blob_path(user.avatar, only_path: true)
+```
+
+Downloading Files
+-----------------
+
+Sometimes you need to process a blob after it’s uploaded—for example, to convert
+it to a different format. Use `ActiveStorage::Blob#download` to read a blob’s
+binary data into memory:
+
+```ruby
+binary = user.avatar.download
+```
+
+You might want to download a blob to a file on disk so an external program (e.g.
+a virus scanner or media transcoder) can operate on it. Use
+`ActiveStorage::Blob#open` to download a blob to a tempfile on disk:
+
+```ruby
+message.video.open do |file|
+  system '/path/to/virus/scanner', file.path
+  # ...
+end
+```
+
+Analyzing Files
+---------------
+
+Active Storage [analyzes](https://api.rubyonrails.org/classes/ActiveStorage/Blob/Analyzable.html#method-i-analyze) files once they've been uploaded by queuing a job in Active Job. Analyzed files will store additional information in the metadata hash, including `analyzed: true`. You can check whether a blob has been analyzed by calling `analyzed?` on it.
+
+Image analysis provides `width` and `height` attributes. Video analysis provides these, as well as `duration`, `angle`, and `display_aspect_ratio`.
+
+Analysis requires the `mini_magick` gem. Video analysis also requires the [FFmpeg](https://www.ffmpeg.org/) library, which you must include separately.
+
 Transforming Images
 -------------------
 
-To create variation of the image, call `variant` on the Blob.
-You can pass any [MiniMagick](https://github.com/minimagick/minimagick)
-supported transformation to the method.
-
-To enable variants, add `mini_magick` to your `Gemfile`:
+To enable variants, add the `image_processing` gem to your `Gemfile`:
 
 ```ruby
-gem 'mini_magick'
+gem 'image_processing'
 ```
 
-When the browser hits the variant URL, Active Storage will lazy transform the
-original blob into the format you specified and redirect to its new service
+To create a variation of an image, call `variant` on the `Blob`. You can pass any transformation to the method supported by the processor. The default processor for Active Storage is MiniMagick, but you can also use [Vips](https://www.rubydoc.info/gems/ruby-vips/Vips/Image).
+
+When the browser hits the variant URL, Active Storage will lazily transform the
+original blob into the specified format and redirect to its new service
 location.
 
 ```erb
-<%= image_tag user.avatar.variant(resize: "100x100") %>
+<%= image_tag user.avatar.variant(resize_to_limit: [100, 100]) %>
+```
+
+To switch to the Vips processor, you would add the following to
+`config/application.rb`:
+
+```ruby
+# Use Vips for processing variants.
+config.active_storage.variant_processor = :vips
 ```
 
 Previewing Files
@@ -359,17 +474,18 @@ the box, Active Storage supports previewing videos and PDF documents.
 <ul>
   <% @message.files.each do |file| %>
     <li>
-      <%= image_tag file.preview(resize: "100x100>") %>
+      <%= image_tag file.preview(resize_to_limit: [100, 100]) %>
     </li>
   <% end %>
 </ul>
 ```
 
-WARNING: Extracting previews requires third-party applications, `ffmpeg` for
-video and `mutool` for PDFs. These libraries are not provided by Rails. You must
-install them yourself to use the built-in previewers. Before you install and use
-third-party software, make sure you understand the licensing implications of
-doing so.
+WARNING: Extracting previews requires third-party applications, FFmpeg for
+video and muPDF for PDFs, and on macOS also XQuartz and Poppler.
+These libraries are not provided by Rails. You must install them yourself to
+use the built-in previewers. Before you install and use third-party software,
+make sure you understand the licensing implications of doing so.
+
 
 Direct Uploads
 --------------
@@ -377,7 +493,7 @@ Direct Uploads
 Active Storage, with its included JavaScript library, supports uploading
 directly from the client to the cloud.
 
-### Direct upload installation
+### Usage
 
 1. Include `activestorage.js` in your application's JavaScript bundle.
 
@@ -391,16 +507,83 @@ directly from the client to the cloud.
     Using the npm package:
 
     ```js
-    import * as ActiveStorage from "activestorage"
-    ActiveStorage.start()
+    require("@rails/activestorage").start()
     ```
 
 2. Annotate file inputs with the direct upload URL.
 
-    ```ruby
+    ```erb
     <%= form.file_field :attachments, multiple: true, direct_upload: true %>
     ```
-3. That's it! Uploads begin upon form submission.
+
+3. Configure CORS on third-party storage services to allow direct upload requests.
+
+4. That's it! Uploads begin upon form submission.
+
+### Cross-Origin Resource Sharing (CORS) configuration
+
+To make direct uploads to a third-party service work, you’ll need to configure the service to allow cross-origin requests from your app. Consult the CORS documentation for your service:
+
+* [S3](https://docs.aws.amazon.com/AmazonS3/latest/dev/cors.html#how-do-i-enable-cors)
+* [Google Cloud Storage](https://cloud.google.com/storage/docs/configuring-cors)
+* [Azure Storage](https://docs.microsoft.com/en-us/rest/api/storageservices/cross-origin-resource-sharing--cors--support-for-the-azure-storage-services)
+
+Take care to allow:
+
+* All origins from which your app is accessed
+* The `PUT` request method
+* The following headers:
+  * `Origin`
+  * `Content-Type`
+  * `Content-MD5`
+  * `Content-Disposition` (except for Azure Storage)
+  * `x-ms-blob-content-disposition` (for Azure Storage only)
+  * `x-ms-blob-type` (for Azure Storage only)
+
+No CORS configuration is required for the Disk service since it shares your app’s origin.
+
+#### Example: S3 CORS configuration
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+<CORSRule>
+    <AllowedOrigin>https://www.example.com</AllowedOrigin>
+    <AllowedMethod>PUT</AllowedMethod>
+    <AllowedHeader>Origin</AllowedHeader>
+    <AllowedHeader>Content-Type</AllowedHeader>
+    <AllowedHeader>Content-MD5</AllowedHeader>
+    <AllowedHeader>Content-Disposition</AllowedHeader>
+    <MaxAgeSeconds>3600</MaxAgeSeconds>
+</CORSRule>
+</CORSConfiguration>
+```
+
+#### Example: Google Cloud Storage CORS configuration
+
+```json
+[
+  {
+    "origin": ["https://www.example.com"],
+    "method": ["PUT"],
+    "responseHeader": ["Origin", "Content-Type", "Content-MD5", "Content-Disposition"],
+    "maxAgeSeconds": 3600
+  }
+]
+```
+
+#### Example: Azure Storage CORS configuration
+
+```xml
+<Cors>
+  <CorsRule>
+    <AllowedOrigins>https://www.example.com</AllowedOrigins>
+    <AllowedMethods>PUT</AllowedMethods>
+    <AllowedHeaders>Origin, Content-Type, Content-MD5, x-ms-blob-content-disposition, x-ms-blob-type</AllowedHeaders>
+    <MaxAgeInSeconds>3600</MaxAgeInSeconds>
+  </CorsRule>
+<Cors>
+```
 
 ### Direct upload JavaScript events
 
@@ -433,9 +616,10 @@ addEventListener("direct-upload:initialize", event => {
   target.insertAdjacentHTML("beforebegin", `
     <div id="direct-upload-${id}" class="direct-upload direct-upload--pending">
       <div id="direct-upload-progress-${id}" class="direct-upload__progress" style="width: 0%"></div>
-      <span class="direct-upload__filename">${file.name}</span>
+      <span class="direct-upload__filename"></span>
     </div>
   `)
+  target.previousElementSibling.querySelector(`.direct-upload__filename`).textContent = file.name
 })
 
 addEventListener("direct-upload:start", event => {
@@ -509,6 +693,92 @@ input[type=file][data-direct-upload-url][disabled] {
 }
 ```
 
+### Integrating with Libraries or Frameworks
+
+If you want to use the Direct Upload feature from a JavaScript framework, or
+you want to integrate custom drag and drop solutions, you can use the
+`DirectUpload` class for this purpose. Upon receiving a file from your library
+of choice, instantiate a DirectUpload and call its create method. Create takes
+a callback to invoke when the upload completes.
+
+```js
+import { DirectUpload } from "@rails/activestorage"
+
+const input = document.querySelector('input[type=file]')
+
+// Bind to file drop - use the ondrop on a parent element or use a
+//  library like Dropzone
+const onDrop = (event) => {
+  event.preventDefault()
+  const files = event.dataTransfer.files;
+  Array.from(files).forEach(file => uploadFile(file))
+}
+
+// Bind to normal file selection
+input.addEventListener('change', (event) => {
+  Array.from(input.files).forEach(file => uploadFile(file))
+  // you might clear the selected files from the input
+  input.value = null
+})
+
+const uploadFile = (file) => {
+  // your form needs the file_field direct_upload: true, which
+  //  provides data-direct-upload-url
+  const url = input.dataset.directUploadUrl
+  const upload = new DirectUpload(file, url)
+
+  upload.create((error, blob) => {
+    if (error) {
+      // Handle the error
+    } else {
+      // Add an appropriately-named hidden input to the form with a
+      //  value of blob.signed_id so that the blob ids will be
+      //  transmitted in the normal upload flow
+      const hiddenField = document.createElement('input')
+      hiddenField.setAttribute("type", "hidden");
+      hiddenField.setAttribute("value", blob.signed_id);
+      hiddenField.name = input.name
+      document.querySelector('form').appendChild(hiddenField)
+    }
+  })
+}
+```
+
+If you need to track the progress of the file upload, you can pass a third
+parameter to the `DirectUpload` constructor. During the upload, DirectUpload
+will call the object's `directUploadWillStoreFileWithXHR` method. You can then
+bind your own progress handler on the XHR.
+
+```js
+import { DirectUpload } from "@rails/activestorage"
+
+class Uploader {
+  constructor(file, url) {
+    this.upload = new DirectUpload(this.file, this.url, this)
+  }
+
+  upload(file) {
+    this.upload.create((error, blob) => {
+      if (error) {
+        // Handle the error
+      } else {
+        // Add an appropriately-named hidden input to the form
+        // with a value of blob.signed_id
+      }
+    })
+  }
+
+  directUploadWillStoreFileWithXHR(request) {
+    request.upload.addEventListener("progress",
+      event => this.directUploadDidProgress(event))
+  }
+
+  directUploadDidProgress(event) {
+    // Use event.loaded and event.total to update the progress bar
+  }
+}
+```
+
 Discarding Files Stored During System Tests
 -------------------------------------------
 
@@ -558,16 +828,22 @@ during the test are complete and you won't receive an error from Active Storage
 saying it can't find a file.
 
 ```ruby
+module RemoveUploadedFiles
+  def after_teardown
+    super
+    remove_uploaded_files
+  end
+
+  private
+
+  def remove_uploaded_files
+    FileUtils.rm_rf(Rails.root.join('tmp', 'storage'))
+  end
+end
+
 module ActionDispatch
   class IntegrationTest
-    def remove_uploaded_files
-      FileUtils.rm_rf(Rails.root.join('tmp', 'storage'))
-    end
-
-    def after_teardown
-      super
-      remove_uploaded_files
-    end
+    prepend RemoveUploadedFiles
   end
 end
 ```
@@ -577,5 +853,5 @@ Implementing Support for Other Cloud Services
 
 If you need to support a cloud service other than these, you will need to
 implement the Service. Each service extends
-[`ActiveStorage::Service`](https://github.com/rails/rails/blob/master/activestorage/lib/active_storage/service.rb)
+[`ActiveStorage::Service`](https://github.com/rails/rails/blob/main/activestorage/lib/active_storage/service.rb)
 by implementing the methods necessary to upload and download files to the cloud.

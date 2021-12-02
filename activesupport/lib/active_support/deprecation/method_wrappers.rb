@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "active_support/core_ext/module/aliasing"
 require "active_support/core_ext/array/extract_options"
+require "active_support/core_ext/module/redefine_method"
 
 module ActiveSupport
   class Deprecation
@@ -53,24 +53,31 @@ module ActiveSupport
         options = method_names.extract_options!
         deprecator = options.delete(:deprecator) || self
         method_names += options.keys
+        mod = nil
 
-        mod = Module.new do
-          method_names.each do |method_name|
-            define_method(method_name) do |*args, &block|
-              deprecator.deprecation_warning(method_name, options[method_name])
-              super(*args, &block)
+        method_names.each do |method_name|
+          if target_module.method_defined?(method_name) || target_module.private_method_defined?(method_name)
+            method = target_module.instance_method(method_name)
+            target_module.module_eval do
+              redefine_method(method_name) do |*args, &block|
+                deprecator.deprecation_warning(method_name, options[method_name])
+                method.bind(self).call(*args, &block)
+              end
+              ruby2_keywords(method_name) if respond_to?(:ruby2_keywords, true)
             end
-
-            case
-            when target_module.protected_method_defined?(method_name)
-              protected method_name
-            when target_module.private_method_defined?(method_name)
-              private method_name
+          else
+            mod ||= Module.new
+            mod.module_eval do
+              define_method(method_name) do |*args, &block|
+                deprecator.deprecation_warning(method_name, options[method_name])
+                super(*args, &block)
+              end
+              ruby2_keywords(method_name) if respond_to?(:ruby2_keywords, true)
             end
           end
         end
 
-        target_module.prepend(mod)
+        target_module.prepend(mod) if mod
       end
     end
   end

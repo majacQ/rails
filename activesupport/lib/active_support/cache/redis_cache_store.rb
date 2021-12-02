@@ -62,38 +62,36 @@ module ActiveSupport
         end
       end
 
-      DELETE_GLOB_LUA = "for i, name in ipairs(redis.call('KEYS', ARGV[1])) do redis.call('DEL', name); end"
-      private_constant :DELETE_GLOB_LUA
+      # The maximum number of entries to receive per SCAN call.
+      SCAN_BATCH_SIZE = 1000
+      private_constant :SCAN_BATCH_SIZE
+
+      # Advertise cache versioning support.
+      def self.supports_cache_versioning?
+        true
+      end
 
       # Support raw values in the local cache strategy.
       module LocalCacheWithRaw # :nodoc:
         private
-          def read_entry(key, options)
-            entry = super
-            if options[:raw] && local_cache && entry
-              entry = deserialize_entry(entry.value)
-            end
-            entry
-          end
-
-          def write_entry(key, entry, options)
+          def write_entry(key, entry, **options)
             if options[:raw] && local_cache
               raw_entry = Entry.new(serialize_entry(entry, raw: true))
               raw_entry.expires_at = entry.expires_at
-              super(key, raw_entry, options)
+              super(key, raw_entry, **options)
             else
               super
             end
           end
 
-          def write_multi_entries(entries, options)
+          def write_multi_entries(entries, **options)
             if options[:raw] && local_cache
               raw_entries = entries.map do |key, entry|
                 raw_entry = Entry.new(serialize_entry(entry, raw: true))
                 raw_entry.expires_at = entry.expires_at
               end.to_h
 
-              super(raw_entries, options)
+              super(raw_entries, **options)
             else
               super
             end
@@ -118,7 +116,7 @@ module ActiveSupport
         def build_redis(redis: nil, url: nil, **redis_options) #:nodoc:
           urls = Array(url)
 
-          if redis.respond_to?(:call)
+          if redis.is_a?(Proc)
             redis.call
           elsif redis
             redis
@@ -146,15 +144,17 @@ module ActiveSupport
 
       # Creates a new Redis cache store.
       #
-      # Handles three options: block provided to instantiate, single URL
-      # provided, and multiple URLs provided.
+      # Handles four options: :redis block, :redis instance, single :url
+      # string, and multiple :url strings.
       #
-      #   :redis Proc   -> options[:redis].call
-      #   :url   String -> Redis.new(url: …)
-      #   :url   Array  -> Redis::Distributed.new([{ url: … }, { url: … }, …])
+      #   Option  Class       Result
+      #   :redis  Proc    ->  options[:redis].call
+      #   :redis  Object  ->  options[:redis]
+      #   :url    String  ->  Redis.new(url: …)
+      #   :url    Array   ->  Redis::Distributed.new([{ url: … }, { url: … }, …])
       #
       # No namespace is set by default. Provide one if the Redis cache
-      # server is shared with other apps: <tt>namespace: 'myapp-cache'<tt>.
+      # server is shared with other apps: <tt>namespace: 'myapp-cache'</tt>.
       #
       # Compression is enabled by default with a 1kB threshold, so cached
       # values larger than 1kB are automatically compressed. Disable by
@@ -231,11 +231,17 @@ module ActiveSupport
       # Failsafe: Raises errors.
       def delete_matched(matcher, options = nil)
         instrument :delete_matched, matcher do
-          case matcher
-          when String
-            redis.with { |c| c.eval DELETE_GLOB_LUA, [], [namespace_key(matcher, options)] }
-          else
+          unless String === matcher
             raise ArgumentError, "Only Redis glob strings are supported: #{matcher.inspect}"
+          end
+          redis.with do |c|
+            pattern = namespace_key(matcher, options)
+            cursor = "0"
+            # Fetch keys in batches using SCAN to avoid blocking the Redis server.
+            begin
+              cursor, keys = c.scan(cursor, match: pattern, count: SCAN_BATCH_SIZE)
+              c.del(*keys) unless keys.empty?
+            end until cursor == "0"
           end
         end
       end
@@ -251,7 +257,14 @@ module ActiveSupport
       def increment(name, amount = 1, options = nil)
         instrument :increment, name, amount: amount do
           failsafe :increment do
-            redis.with { |c| c.incrby normalize_key(name, options), amount }
+            options = merged_options(options)
+            key = normalize_key(name, options)
+
+            redis.with do |c|
+              c.incrby(key, amount).tap do
+                write_key_expiry(c, key, options)
+              end
+            end
           end
         end
       end
@@ -267,7 +280,14 @@ module ActiveSupport
       def decrement(name, amount = 1, options = nil)
         instrument :decrement, name, amount: amount do
           failsafe :decrement do
-            redis.with { |c| c.decrby normalize_key(name, options), amount }
+            options = merged_options(options)
+            key = normalize_key(name, options)
+
+            redis.with do |c|
+              c.decrby(key, amount).tap do
+                write_key_expiry(c, key, options)
+              end
+            end
           end
         end
       end
@@ -286,7 +306,7 @@ module ActiveSupport
       # Failsafe: Raises errors.
       def clear(options = nil)
         failsafe :clear do
-          if namespace = merged_options(options)[namespace]
+          if namespace = merged_options(options)[:namespace]
             delete_matched "*", namespace: namespace
           else
             redis.with { |c| c.flushdb }
@@ -318,15 +338,16 @@ module ActiveSupport
 
         # Store provider interface:
         # Read an entry from the cache.
-        def read_entry(key, options = nil)
+        def read_entry(key, **options)
           failsafe :read_entry do
-            deserialize_entry redis.with { |c| c.get(key) }
+            raw = options&.fetch(:raw, false)
+            deserialize_entry(redis.with { |c| c.get(key) }, raw: raw)
           end
         end
 
-        def read_multi_entries(names, _options)
+        def read_multi_entries(names, **options)
           if mget_capable?
-            read_multi_mget(*names)
+            read_multi_mget(*names, **options)
           else
             super
           end
@@ -335,6 +356,8 @@ module ActiveSupport
         def read_multi_mget(*names)
           options = names.extract_options!
           options = merged_options(options)
+          return {} if names == []
+          raw = options&.fetch(:raw, false)
 
           keys = names.map { |name| normalize_key(name, options) }
 
@@ -344,7 +367,7 @@ module ActiveSupport
 
           names.zip(values).each_with_object({}) do |(name, value), results|
             if value
-              entry = deserialize_entry(value)
+              entry = deserialize_entry(value, raw: raw)
               unless entry.nil? || entry.expired? || entry.mismatched?(normalize_version(name, options))
                 results[name] = entry.value
               end
@@ -371,10 +394,16 @@ module ActiveSupport
               modifiers[:nx] = unless_exist
               modifiers[:px] = (1000 * expires_in.to_f).ceil if expires_in
 
-              redis.with { |c| c.set key, serialized_entry, modifiers }
+              redis.with { |c| c.set key, serialized_entry, **modifiers }
             else
               redis.with { |c| c.set key, serialized_entry }
             end
+          end
+        end
+
+        def write_key_expiry(client, key, options)
+          if options[:expires_in] && client.ttl(key).negative?
+            client.expire key, options[:expires_in].to_i
           end
         end
 
@@ -413,9 +442,20 @@ module ActiveSupport
           end
         end
 
-        def deserialize_entry(serialized_entry)
+        def deserialize_entry(serialized_entry, raw:)
           if serialized_entry
             entry = Marshal.load(serialized_entry) rescue serialized_entry
+
+            written_raw = serialized_entry.equal?(entry)
+            if raw != written_raw
+              ActiveSupport::Deprecation.warn(<<-MSG.squish)
+                Using a different value for the raw option when reading and writing
+                to a cache key is deprecated for :redis_cache_store and Rails 6.0
+                will stop automatically detecting the format when reading to avoid
+                marshal loading untrusted raw strings.
+              MSG
+            end
+
             entry.is_a?(Entry) ? entry : Entry.new(entry)
           end
         end
@@ -436,7 +476,7 @@ module ActiveSupport
 
         def failsafe(method, returning: nil)
           yield
-        rescue ::Redis::BaseConnectionError => e
+        rescue ::Redis::BaseError => e
           handle_exception exception: e, method: method, returning: returning
           returning
         end

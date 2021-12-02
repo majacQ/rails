@@ -4,8 +4,12 @@ module Rails
   module Command
     module Spellchecker # :nodoc:
       class << self
-        def suggest(word, from:, count: 3)
-          from.sort_by { |w| levenshtein_distance(word, w) }.take(count)
+        def suggest(word, from:)
+          if defined?(DidYouMean::SpellChecker)
+            DidYouMean::SpellChecker.new(dictionary: from.map(&:to_s)).correct(word).first
+          else
+            from.sort_by { |w| levenshtein_distance(word, w) }.first
+          end
         end
 
         private
@@ -19,8 +23,8 @@ module Rails
             n = s.length
             m = t.length
 
-            return m if (0 == n)
-            return n if (0 == m)
+            return m if 0 == n
+            return n if 0 == m
 
             d = (0..m).to_a
             x = nil

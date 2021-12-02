@@ -17,13 +17,26 @@ class ActiveStorage::PreviewTest < ActiveSupport::TestCase
     assert_equal 792, image.height
   end
 
+  test "previewing a cropped PDF" do
+    blob = create_file_blob(filename: "cropped.pdf", content_type: "application/pdf")
+    preview = blob.preview(resize: "640x280").processed
+
+    assert_predicate preview.image, :attached?
+    assert_equal "cropped.png", preview.image.filename.to_s
+    assert_equal "image/png", preview.image.content_type
+
+    image = read_image(preview.image)
+    assert_equal 430, image.width
+    assert_equal 145, image.height
+  end
+
   test "previewing an MP4 video" do
     blob = create_file_blob(filename: "video.mp4", content_type: "video/mp4")
     preview = blob.preview(resize: "640x280").processed
 
     assert_predicate preview.image, :attached?
-    assert_equal "video.png", preview.image.filename.to_s
-    assert_equal "image/png", preview.image.content_type
+    assert_equal "video.jpg", preview.image.filename.to_s
+    assert_equal "image/jpeg", preview.image.content_type
 
     image = read_image(preview.image)
     assert_equal 640, image.width
@@ -36,5 +49,16 @@ class ActiveStorage::PreviewTest < ActiveSupport::TestCase
     assert_raises ActiveStorage::UnpreviewableError do
       blob.preview resize: "640x280"
     end
+  end
+
+  test "previewing on the writer DB" do
+    blob = create_file_blob(filename: "report.pdf", content_type: "application/pdf")
+
+    # Simulate a selector middleware switching to a read-only replica.
+    ActiveRecord::Base.connection_handler.while_preventing_writes do
+      blob.preview(resize: "640x280").processed
+    end
+
+    assert blob.reload.preview_image.attached?
   end
 end

@@ -9,7 +9,7 @@ class SSLTest < ActionDispatch::IntegrationTest
 
   def build_app(headers: {}, ssl_options: {})
     headers = HEADERS.merge(headers)
-    ActionDispatch::SSL.new lambda { |env| [200, headers, []] }, ssl_options.reverse_merge(hsts: { subdomains: true })
+    ActionDispatch::SSL.new lambda { |env| [200, headers, []] }, **ssl_options.reverse_merge(hsts: { subdomains: true })
   end
 end
 
@@ -208,13 +208,21 @@ class SecureCookiesTest < SSLTest
     assert_cookies(*DEFAULT.split("\n"))
   end
 
+  def test_cookies_as_not_secure_with_exclude
+    excluding = { exclude: -> request { request.domain =~ /example/ } }
+    get headers: { "Set-Cookie" => DEFAULT }, ssl_options: { redirect: excluding }
+
+    assert_cookies(*DEFAULT.split("\n"))
+    assert_response :ok
+  end
+
   def test_no_cookies
     get
     assert_nil response.headers["Set-Cookie"]
   end
 
   def test_keeps_original_headers_behavior
-    get headers: { "Connection" => %w[close] }
+    get headers: { "Connection" => "close" }
     assert_equal "close", response.headers["Connection"]
   end
 end

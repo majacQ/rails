@@ -15,6 +15,7 @@ require "models/bulb"
 require "models/engine"
 require "models/wheel"
 require "models/treasure"
+require "models/frog"
 
 class LockWithoutDefault < ActiveRecord::Base; end
 
@@ -181,7 +182,9 @@ class OptimisticLockingTest < ActiveRecord::TestCase
 
     p1.touch
     assert_equal 1, p1.lock_version
-    assert_not p1.changed?, "Changes should have been cleared"
+    assert_not_predicate p1, :changed?, "Changes should have been cleared"
+    assert_predicate p1, :saved_changes?
+    assert_equal ["lock_version", "updated_at"], p1.saved_changes.keys.sort
   end
 
   def test_touch_stale_object
@@ -192,6 +195,8 @@ class OptimisticLockingTest < ActiveRecord::TestCase
     assert_raises(ActiveRecord::StaleObjectError) do
       stale_person.touch
     end
+
+    assert_not_predicate stale_person, :saved_changes?
   end
 
   def test_update_with_dirty_primary_key
@@ -295,6 +300,9 @@ class OptimisticLockingTest < ActiveRecord::TestCase
     t1.touch
 
     assert_equal 1, t1.lock_version
+    assert_not_predicate t1, :changed?
+    assert_predicate t1, :saved_changes?
+    assert_equal ["lock_version", "updated_at"], t1.saved_changes.keys.sort
   end
 
   def test_touch_stale_object_with_lock_without_default
@@ -306,6 +314,8 @@ class OptimisticLockingTest < ActiveRecord::TestCase
     assert_raises(ActiveRecord::StaleObjectError) do
       stale_object.touch
     end
+
+    assert_not_predicate stale_object, :saved_changes?
   end
 
   def test_lock_without_default_should_work_with_null_in_the_database
@@ -444,32 +454,44 @@ class OptimisticLockingTest < ActiveRecord::TestCase
     assert_equal 0, car.wheels_count
     assert_equal 0, car.lock_version
 
-    previously_car_updated_at = car.updated_at
-    travel(2.second) do
+    previously_updated_at = car.updated_at
+    previously_wheels_owned_at = car.wheels_owned_at
+    travel(1.second) do
       Wheel.create!(wheelable: car)
     end
 
     assert_equal 1, car.reload.wheels_count
-    assert_not_equal previously_car_updated_at, car.updated_at
     assert_equal 1, car.lock_version
+    assert_operator previously_updated_at, :<, car.updated_at
+    assert_operator previously_wheels_owned_at, :<, car.wheels_owned_at
 
-    previously_car_updated_at = car.updated_at
-    travel(1.day) do
+    previously_updated_at = car.updated_at
+    previously_wheels_owned_at = car.wheels_owned_at
+    travel(2.second) do
       car.wheels.first.update(size: 42)
     end
 
     assert_equal 1, car.reload.wheels_count
-    assert_not_equal previously_car_updated_at, car.updated_at
     assert_equal 2, car.lock_version
+    assert_operator previously_updated_at, :<, car.updated_at
+    assert_operator previously_wheels_owned_at, :<, car.wheels_owned_at
 
-    previously_car_updated_at = car.updated_at
-    travel(2.second) do
+    previously_updated_at = car.updated_at
+    previously_wheels_owned_at = car.wheels_owned_at
+    travel(3.second) do
       car.wheels.first.destroy!
     end
 
     assert_equal 0, car.reload.wheels_count
-    assert_not_equal previously_car_updated_at, car.updated_at
     assert_equal 3, car.lock_version
+    assert_operator previously_updated_at, :<, car.updated_at
+    assert_operator previously_wheels_owned_at, :<, car.wheels_owned_at
+
+    car.wheels << Wheel.create!
+    assert_equal 1, car.wheels_count
+    assert_equal 4, car.lock_version
+    assert_not car.lock_version_changed?
+    assert_nothing_raised { car.update(name: "herbie") }
   end
 
   def test_polymorphic_destroy_with_dependencies_and_lock_version
@@ -577,7 +599,6 @@ class OptimisticLockingWithSchemaChangeTest < ActiveRecord::TestCase
   end
 
   private
-
     def add_counter_column_to(model, col = "test_count")
       model.connection.add_column model.table_name, col, :integer, null: false, default: 0
       model.reset_column_information
@@ -650,6 +671,16 @@ unless in_memory_db?
       person.first_name = "fooman"
       assert_raises(RuntimeError) do
         person.lock!
+      end
+    end
+
+    def test_locking_in_after_save_callback
+      assert_nothing_raised do
+        frog = ::Frog.create(name: "Old Frog")
+        frog.name = "New Frog"
+        assert_not_deprecated do
+          frog.save!
+        end
       end
     end
 

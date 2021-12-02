@@ -68,7 +68,9 @@ class FileStoreTest < ActiveSupport::TestCase
   def test_filename_max_size
     key = "#{'A' * ActiveSupport::Cache::FileStore::FILENAME_MAX_SIZE}"
     path = @cache.send(:normalize_key, key, {})
-    Dir::Tmpname.create(path) do |tmpname, n, opts|
+    basename = File.basename(path)
+    dirname = File.dirname(path)
+    Dir::Tmpname.create(basename, Dir.tmpdir + dirname) do |tmpname, n, opts|
       assert File.basename(tmpname + ".lock").length <= 255, "Temp filename too long: #{File.basename(tmpname + '.lock').length}"
     end
   end
@@ -99,12 +101,12 @@ class FileStoreTest < ActiveSupport::TestCase
     end
     assert File.exist?(cache_dir), "Parent of top level cache dir was deleted!"
     assert File.exist?(sub_cache_dir), "Top level cache dir was deleted!"
-    assert_empty Dir.entries(sub_cache_dir).reject { |f| ActiveSupport::Cache::FileStore::EXCLUDED_DIRS.include?(f) }
+    assert_empty Dir.children(sub_cache_dir)
   end
 
   def test_log_exception_when_cache_read_fails
     File.stub(:exist?, -> { raise StandardError.new("failed") }) do
-      @cache.send(:read_entry, "winston", {})
+      @cache.send(:read_entry, "winston", **{})
       assert_predicate @buffer.string, :present?
     end
   end
@@ -121,6 +123,14 @@ class FileStoreTest < ActiveSupport::TestCase
       assert @cache.exist?("quux")
       assert_equal 2, Dir.glob(File.join(cache_dir, "**")).size
     end
+  end
+
+  def test_cleanup_when_non_active_support_cache_file_exists
+    cache_file_path = @cache.send(:normalize_key, "foo", nil)
+    FileUtils.makedirs(File.dirname(cache_file_path))
+    File.atomic_write(cache_file_path, cache_dir) { |f| Marshal.dump({ "foo": "bar" }, f) }
+    assert_nothing_raised { @cache.cleanup }
+    assert_equal 1, Dir.glob(File.join(cache_dir, "**")).size
   end
 
   def test_write_with_unless_exist

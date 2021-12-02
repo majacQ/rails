@@ -9,17 +9,13 @@ gemspec
 # We need a newish Rake since Active Job sets its test tasks' descriptions.
 gem "rake", ">= 11.1"
 
-# This needs to be with require false to ensure correct loading order, as it has to
-# be loaded after loading the test library.
-gem "mocha", require: false
-
-gem "capybara", ">= 2.15", "< 4.0"
+gem "capybara", ">= 2.15"
+gem "selenium-webdriver", ">= 4.0.0.alpha7"
 
 gem "rack-cache", "~> 1.2"
-gem "coffee-rails"
 gem "sass-rails"
 gem "turbolinks", "~> 5"
-
+gem "webpacker", "~> 4.0", require: ENV["SKIP_REQUIRE_WEBPACKER"] != "true"
 # require: false so bcrypt is loaded only when has_secure_password is used.
 # This is to avoid Active Model (and by extension the entire framework)
 # being dependent on a binary library.
@@ -33,40 +29,38 @@ gem "uglifier", ">= 1.3.0", require: false
 gem "json", ">= 2.0.0"
 
 gem "rubocop", ">= 0.47", require: false
-
-# https://github.com/guard/rb-inotify/pull/79
-gem "rb-inotify", github: "matthewd/rb-inotify", branch: "close-handling", require: false
+gem "rubocop-performance", require: false
+gem "rubocop-rails", require: false
 
 group :doc do
-  gem "sdoc", "~> 1.0"
+  gem "sdoc", "~> 1.1"
   gem "redcarpet", "~> 3.2.3", platforms: :ruby
-  gem "w3c_validators"
+  gem "w3c_validators", "~> 1.3.6"
   gem "kindlerb", "~> 1.2.0"
 end
 
-# Active Support.
-gem "dalli", ">= 2.2.1"
-gem "listen", ">= 3.0.5", "< 3.2", require: false
+# Active Support
+gem "dalli"
+gem "listen", "~> 3.2", require: false, github: "guard/listen"
 gem "libxml-ruby", platforms: :ruby
 gem "connection_pool", require: false
+gem "rexml", require: false
 
-# for railties app_generator_test
-gem "bootsnap", ">= 1.1.0", require: false
+# for railties
+gem "bootsnap", ">= 1.4.2", require: false
+gem "webrick", require: false
 
-# Active Job.
+# Active Job
 group :job do
   gem "resque", require: false
   gem "resque-scheduler", require: false
   gem "sidekiq", require: false
   gem "sucker_punch", require: false
   gem "delayed_job", require: false
-  gem "queue_classic", github: "rafaelfranca/queue_classic", branch: "update-pg", require: false, platforms: :ruby
+  gem "queue_classic", github: "QueueClassic/queue_classic", require: false, platforms: :ruby
   gem "sneakers", require: false
   gem "que", require: false
   gem "backburner", require: false
-  # TODO: add qu after it support Rails 5.1
-  # gem 'qu-rails', github: "bkeepers/qu", branch: "master", require: false
-  # gem "qu-redis", require: false
   gem "delayed_job_active_record", require: false
   gem "sequel", require: false
 end
@@ -78,7 +72,7 @@ group :cable do
   gem "hiredis", require: false
   gem "redis", "~> 4.0", require: false
 
-  gem "redis-namespace"
+  gem "redis-namespace", github: "resque/redis-namespace"
 
   gem "websocket-client-simple", github: "matthewd/websocket-client-simple", branch: "close-race", require: false
 
@@ -90,15 +84,19 @@ end
 # Active Storage
 group :storage do
   gem "aws-sdk-s3", require: false
-  gem "google-cloud-storage", "~> 1.8", require: false
+  gem "google-cloud-storage", "~> 1.11", require: false
   gem "azure-storage", require: false
 
-  gem "mini_magick"
+  gem "image_processing", "~> 1.2"
 end
+
+# Action Mailbox
+gem "aws-sdk-sns", require: false
+gem "webmock"
 
 group :ujs do
   gem "qunit-selenium"
-  gem "chromedriver-helper"
+  gem "webdrivers"
 end
 
 # Add your own local bundler stuff.
@@ -107,6 +105,8 @@ instance_eval File.read local_gemfile if File.exist? local_gemfile
 
 group :test do
   gem "minitest-bisect"
+  gem "minitest-retry"
+  gem "minitest-reporters"
 
   platforms :mri do
     gem "stackprof"
@@ -123,7 +123,7 @@ platforms :ruby, :mswin, :mswin64, :mingw, :x64_mingw do
   gem "racc", ">=1.4.6", require: false
 
   # Active Record.
-  gem "sqlite3", "~> 1.3.6"
+  gem "sqlite3", "~> 1.4"
 
   group :db do
     gem "pg", ">= 0.18.0"

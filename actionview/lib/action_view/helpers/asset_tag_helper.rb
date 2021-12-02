@@ -55,6 +55,8 @@ module ActionView
       #   that path.
       # * <tt>:skip_pipeline</tt>  - This option is used to bypass the asset pipeline
       #   when it is set to true.
+      # * <tt>:nonce</tt>  - When set to true, adds an automatic nonce value if
+      #   you have Content Security Policy enabled.
       #
       # ==== Examples
       #
@@ -79,6 +81,9 @@ module ActionView
       #
       #   javascript_include_tag "http://www.example.com/xmlhr.js"
       #   # => <script src="http://www.example.com/xmlhr.js"></script>
+      #
+      #   javascript_include_tag "http://www.example.com/xmlhr.js", nonce: true
+      #   # => <script src="http://www.example.com/xmlhr.js" nonce="..."></script>
       def javascript_include_tag(*sources)
         options = sources.extract_options!.stringify_keys
         path_options = options.extract!("protocol", "extname", "host", "skip_pipeline").symbolize_keys
@@ -90,7 +95,10 @@ module ActionView
           tag_options = {
             "src" => href
           }.merge!(options)
-          content_tag("script".freeze, "", tag_options)
+          if tag_options["nonce"] == true
+            tag_options["nonce"] = content_security_policy_nonce
+          end
+          content_tag("script", "", tag_options)
         }.join("\n").html_safe
 
         request.send_early_hints("Link" => early_hints_links.join("\n")) if respond_to?(:request) && request
@@ -105,7 +113,7 @@ module ActionView
       # to "screen", so you must explicitly set it to "all" for the stylesheet(s) to
       # apply to all media types.
       #
-      # If the server supports Early Hints header links for these assets  will be
+      # If the server supports Early Hints header links for these assets will be
       # automatically pushed.
       #
       #   stylesheet_link_tag "style"
@@ -266,7 +274,7 @@ module ActionView
         crossorigin = "anonymous" if crossorigin == true || (crossorigin.blank? && as_type == "font")
         nopush = options.delete(:nopush) || false
 
-        link_tag = tag.link({
+        link_tag = tag.link(**{
           rel: "preload",
           href: href,
           as: as_type,
@@ -321,14 +329,14 @@ module ActionView
       #   image_tag("pic.jpg", srcset: [["pic_1024.jpg", "1024w"], ["pic_1980.jpg", "1980w"]], sizes: "100vw")
       #   # => <img src="/assets/pic.jpg" srcset="/assets/pic_1024.jpg 1024w, /assets/pic_1980.jpg 1980w" sizes="100vw">
       #
-      # Active Storage (images that are uploaded by the users of your app):
+      # Active Storage blobs (images that are uploaded by the users of your app):
       #
       #   image_tag(user.avatar)
       #   # => <img src="/rails/active_storage/blobs/.../tiger.jpg" />
-      #   image_tag(user.avatar.variant(resize: "100x100"))
-      #   # => <img src="/rails/active_storage/variants/.../tiger.jpg" />
-      #   image_tag(user.avatar.variant(resize: "100x100"), size: '100')
-      #   # => <img width="100" height="100" src="/rails/active_storage/variants/.../tiger.jpg" />
+      #   image_tag(user.avatar.variant(resize_to_limit: [100, 100]))
+      #   # => <img src="/rails/active_storage/representations/.../tiger.jpg" />
+      #   image_tag(user.avatar.variant(resize_to_limit: [100, 100]), size: '100')
+      #   # => <img width="100" height="100" src="/rails/active_storage/representations/.../tiger.jpg" />
       def image_tag(source, options = {})
         options = options.symbolize_keys
         check_for_image_tag_errors(options)
@@ -345,29 +353,6 @@ module ActionView
 
         options[:width], options[:height] = extract_dimensions(options.delete(:size)) if options[:size]
         tag("img", options)
-      end
-
-      # Returns a string suitable for an HTML image tag alt attribute.
-      # The +src+ argument is meant to be an image file path.
-      # The method removes the basename of the file path and the digest,
-      # if any. It also removes hyphens and underscores from file names and
-      # replaces them with spaces, returning a space-separated, titleized
-      # string.
-      #
-      # ==== Examples
-      #
-      #   image_alt('rails.png')
-      #   # => Rails
-      #
-      #   image_alt('hyphenated-file-name.png')
-      #   # => Hyphenated file name
-      #
-      #   image_alt('underscored_file_name.png')
-      #   # => Underscored file name
-      def image_alt(src)
-        ActiveSupport::Deprecation.warn("image_alt is deprecated and will be removed from Rails 6.0. You must explicitly set alt text on images.")
-
-        File.basename(src, ".*".freeze).sub(/-[[:xdigit:]]{32,64}\z/, "".freeze).tr("-_".freeze, " ".freeze).capitalize
       end
 
       # Returns an HTML video tag for the +sources+. If +sources+ is a string,

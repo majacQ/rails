@@ -3,6 +3,7 @@
 require "cases/helper"
 require "models/author"
 require "models/book"
+require "active_support/log_subscriber/test_helper"
 
 class EnumTest < ActiveRecord::TestCase
   fixtures :books, :authors, :author_addresses
@@ -42,6 +43,11 @@ class EnumTest < ActiveRecord::TestCase
     assert_equal @book, Book.medium_to_read.first
     assert_equal books(:ddd), Book.forgotten.first
     assert_equal books(:rfr), authors(:david).unpublished_books.first
+  end
+
+  test "find via negative scope" do
+    assert Book.not_published.exclude?(@book)
+    assert Book.not_proposed.include?(@book)
   end
 
   test "find via where with values" do
@@ -265,6 +271,35 @@ class EnumTest < ActiveRecord::TestCase
     assert_equal "published", @book.status
   end
 
+  test "invalid definition values raise an ArgumentError" do
+    e = assert_raises(ArgumentError) do
+      Class.new(ActiveRecord::Base) do
+        self.table_name = "books"
+        enum status: [proposed: 1, written: 2, published: 3]
+      end
+    end
+
+    assert_match(/must be either a hash, an array of symbols, or an array of strings./, e.message)
+
+    e = assert_raises(ArgumentError) do
+      Class.new(ActiveRecord::Base) do
+        self.table_name = "books"
+        enum status: { "" => 1, "active" => 2 }
+      end
+    end
+
+    assert_match(/Enum label name must not be blank/, e.message)
+
+    e = assert_raises(ArgumentError) do
+      Class.new(ActiveRecord::Base) do
+        self.table_name = "books"
+        enum status: ["active", ""]
+      end
+    end
+
+    assert_match(/Enum label name must not be blank/, e.message)
+  end
+
   test "reserved enum names" do
     klass = Class.new(ActiveRecord::Base) do
       self.table_name = "books"
@@ -409,6 +444,20 @@ class EnumTest < ActiveRecord::TestCase
     assert_equal ["drafted", "uploaded"], book2.status_change
   end
 
+  test "attempting to modify enum raises error" do
+    e = assert_raises(RuntimeError) do
+      Book.statuses["bad_enum"] = 40
+    end
+
+    assert_match(/can't modify frozen/, e.message)
+
+    e = assert_raises(RuntimeError) do
+      Book.statuses.delete("published")
+    end
+
+    assert_match(/can't modify frozen/, e.message)
+  end
+
   test "declare multiple enums at a time" do
     klass = Class.new(ActiveRecord::Base) do
       self.table_name = "books"
@@ -507,5 +556,110 @@ class EnumTest < ActiveRecord::TestCase
 
   test "data type of Enum type" do
     assert_equal :integer, Book.type_for_attribute("status").type
+  end
+
+  test "scopes can be disabled" do
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "books"
+      enum status: [:proposed, :written], _scopes: false
+    end
+
+    assert_raises(NoMethodError) { klass.proposed }
+  end
+
+  test "enum logs a warning if auto-generated negative scopes would clash with other enum names" do
+    old_logger = ActiveRecord::Base.logger
+    logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
+
+    ActiveRecord::Base.logger = logger
+
+    expected_message_1 = "Enum element 'not_sent' in Book uses the prefix 'not_'."\
+      " This has caused a conflict with auto generated negative scopes."\
+      " Avoid using enum elements starting with 'not' where the positive form is also an element."
+
+    # this message comes from ActiveRecord::Scoping::Named, but it's worth noting that both occur in this case
+    expected_message_2 = "Creating scope :not_sent. Overwriting existing method Book.not_sent."
+
+    Class.new(ActiveRecord::Base) do
+      def self.name
+        "Book"
+      end
+      silence_warnings do
+        enum status: [:sent, :not_sent]
+      end
+    end
+
+    assert_includes(logger.logged(:warn), expected_message_1)
+    assert_includes(logger.logged(:warn), expected_message_2)
+  ensure
+    ActiveRecord::Base.logger = old_logger
+  end
+
+  test "enum logs a warning if auto-generated negative scopes would clash with other enum names regardless of order" do
+    old_logger = ActiveRecord::Base.logger
+    logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
+
+    ActiveRecord::Base.logger = logger
+
+    expected_message_1 = "Enum element 'not_sent' in Book uses the prefix 'not_'."\
+      " This has caused a conflict with auto generated negative scopes."\
+      " Avoid using enum elements starting with 'not' where the positive form is also an element."
+
+    # this message comes from ActiveRecord::Scoping::Named, but it's worth noting that both occur in this case
+    expected_message_2 = "Creating scope :not_sent. Overwriting existing method Book.not_sent."
+
+    Class.new(ActiveRecord::Base) do
+      def self.name
+        "Book"
+      end
+      silence_warnings do
+        enum status: [:not_sent, :sent]
+      end
+    end
+
+    assert_includes(logger.logged(:warn), expected_message_1)
+    assert_includes(logger.logged(:warn), expected_message_2)
+  ensure
+    ActiveRecord::Base.logger = old_logger
+  end
+
+  test "enum doesn't log a warning if no clashes detected" do
+    old_logger = ActiveRecord::Base.logger
+    logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
+
+    ActiveRecord::Base.logger = logger
+
+    Class.new(ActiveRecord::Base) do
+      def self.name
+        "Book"
+      end
+      silence_warnings do
+        enum status: [:not_sent]
+      end
+    end
+
+    assert_empty(logger.logged(:warn))
+  ensure
+    ActiveRecord::Base.logger = old_logger
+  end
+
+  test "enum doesn't log a warning if opting out of scopes" do
+    old_logger = ActiveRecord::Base.logger
+    logger = ActiveSupport::LogSubscriber::TestHelper::MockLogger.new
+
+    ActiveRecord::Base.logger = logger
+
+    Class.new(ActiveRecord::Base) do
+      def self.name
+        "Book"
+      end
+      silence_warnings do
+        enum status: [:not_sent, :sent], _scopes: false
+      end
+    end
+
+    assert_empty(logger.logged(:warn))
+  ensure
+    ActiveRecord::Base.logger = old_logger
   end
 end
