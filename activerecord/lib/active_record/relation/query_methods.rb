@@ -710,6 +710,18 @@ module ActiveRecord
     #
     #   User.active.invert_where
     #   # WHERE NOT (`accepted` = 1 AND `locked` = 0)
+    #
+    # Be careful because this inverts all conditions before +invert_where+ call.
+    #
+    #   class User
+    #     scope :active, -> { where(accepted: true, locked: false) }
+    #     scope :inactive, -> { active.invert_where } # Do not attempt it
+    #   end
+    #
+    #   # It also inverts `where(role: 'admin')` unexpectedly.
+    #   User.where(role: 'admin').inactive
+    #   # WHERE NOT (`role` = 'admin' AND `accepted` = 1 AND `locked` = 0)
+    #
     def invert_where
       spawn.invert_where!
     end
@@ -937,7 +949,7 @@ module ActiveRecord
       self
     end
 
-    # Specifies table from which the records will be fetched. For example:
+    # Specifies the table from which the records will be fetched. For example:
     #
     #   Topic.select('title').from('posts')
     #   # SELECT title FROM posts
@@ -947,9 +959,26 @@ module ActiveRecord
     #   Topic.select('title').from(Topic.approved)
     #   # SELECT title FROM (SELECT * FROM topics WHERE approved = 't') subquery
     #
+    # Passing a second argument (string or symbol), creates the alias for the SQL from clause. Otherwise the alias "subquery" is used:
+    #
     #   Topic.select('a.title').from(Topic.approved, :a)
     #   # SELECT a.title FROM (SELECT * FROM topics WHERE approved = 't') a
     #
+    # It does not add multiple arguments to the SQL from clause. The last +from+ chained is the one used:
+    #
+    #   Topic.select('title').from(Topic.approved).from(Topic.inactive)
+    #   # SELECT title FROM (SELECT topics.* FROM topics WHERE topics.active = 'f') subquery
+    #
+    # For multiple arguments for the SQL from clause, you can pass a string with the exact elements in the SQL from list:
+    #
+    #   color = "red"
+    #   Color
+    #     .from("colors c, JSONB_ARRAY_ELEMENTS(colored_things) AS colorvalues(colorvalue)")
+    #     .where("colorvalue->>'color' = ?", color)
+    #     .select("c.*").to_a
+    #   # SELECT c.*
+    #   # FROM colors c, JSONB_ARRAY_ELEMENTS(colored_things) AS colorvalues(colorvalue)
+    #   # WHERE (colorvalue->>'color' = 'red')
     def from(value, subquery_name = nil)
       spawn.from!(value, subquery_name)
     end
@@ -1225,7 +1254,7 @@ module ActiveRecord
         raise ImmutableRelation if defined?(@arel) && @arel
       end
 
-      def build_arel(aliases)
+      def build_arel(aliases = nil)
         arel = Arel::SelectManager.new(table)
 
         build_joins(arel.join_sources, aliases)
@@ -1262,8 +1291,7 @@ module ActiveRecord
       end
 
       def build_cast_value(name, value)
-        cast_value = ActiveModel::Attribute.with_cast_value(name, value, Type.default_value)
-        Arel::Nodes::BindParam.new(cast_value)
+        ActiveModel::Attribute.with_cast_value(name, value, Type.default_value)
       end
 
       def build_from
@@ -1374,7 +1402,7 @@ module ActiveRecord
       def build_select(arel)
         if select_values.any?
           arel.project(*arel_columns(select_values))
-        elsif klass.ignored_columns.any?
+        elsif klass.ignored_columns.any? || klass.enumerate_columns_in_select_statements
           arel.project(*klass.column_names.map { |field| table[field] })
         else
           arel.project(table[Arel.star])

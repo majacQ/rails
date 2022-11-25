@@ -2,6 +2,7 @@
 
 require "set"
 require "active_support/core_ext/string/inflections"
+require "zeitwerk"
 
 module ActiveSupport
   module Dependencies
@@ -35,10 +36,6 @@ module ActiveSupport
         def verbose=(verbose)
           l = verbose ? logger || Rails.logger : nil
           Rails.autoloaders.each { |autoloader| autoloader.logger = l }
-        end
-
-        def unhook!
-          :no_op
         end
       end
 
@@ -107,7 +104,6 @@ module ActiveSupport
           end
 
           def decorate_dependencies
-            Dependencies.unhook!
             Dependencies.singleton_class.prepend(Decorations)
             Object.prepend(RequireDependency)
           end

@@ -1254,8 +1254,8 @@ This produces:
 
 ```sql
 SELECT books.* FROM books
-  INNER JOIN reviews ON reviews.book_id = book.id
-  INNER JOIN customer ON customers.id = reviews.id
+  INNER JOIN reviews ON reviews.book_id = books.id
+  INNER JOIN customers ON customers.id = reviews.customer_id
 ```
 
 Or, in English: "return all books that have a review by a customer."
@@ -1444,6 +1444,7 @@ NOTE: If an association is eager loaded as part of a join, any fields from a cus
 This is because it is ambiguous whether they should appear on the parent record, or the child.
 
 ### preload
+
 With `preload`, Active record ensures that loaded using a query for every specified association.
 
 Revisiting the case where N + 1 was occurred using the `preload` method, we could rewrite `Book.limit(10)` to authors:
@@ -1468,6 +1469,7 @@ SELECT `authors`.* FROM `authors`
 NOTE: The `preload` method using an array, hash, or a nested hash of array/hash in the same way as the includes method to load any number of associations with a single `Model.find` call. However, unlike the `includes` method, it is not possible to specify conditions for eager loaded associations.
 
 ### eager_load
+
 With `eager_load`, Active record ensures that force eager loading by using　`LEFT OUTER JOIN` for all specified associations.
 
 Revisiting the case where N + 1 was occurred using the `eager_load` method, we could rewrite `Book.limit(10)` to authors:
@@ -1990,7 +1992,7 @@ This method will return an instance of `ActiveRecord::Result` class and calling 
 object would return you an array of hashes where each hash indicates a record.
 
 ```irb
-irb> Customer.connection.select_all("SELECT first_name, created_at FROM customers WHERE id = '1'").to_hash
+irb> Customer.connection.select_all("SELECT first_name, created_at FROM customers WHERE id = '1'").to_a
 => [{"first_name"=>"Rafael", "created_at"=>"2012-11-10 23:23:45.281189"}, {"first_name"=>"Eileen", "created_at"=>"2013-12-09 11:22:35.221282"}]
 ```
 
@@ -2216,7 +2218,7 @@ If you want to see the average of a certain number in one of your tables you can
 Order.average("subtotal")
 ```
 
-This will return a number (possibly a floating point number such as 3.14159265) representing the average value in the field.
+This will return a number (possibly a floating-point number such as 3.14159265) representing the average value in the field.
 
 For options, please see the parent section, [Calculations](#calculations).
 

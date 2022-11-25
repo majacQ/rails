@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "set"
-require "active_record/connection_adapters/schema_cache"
 require "active_record/connection_adapters/sql_type_metadata"
 require "active_record/connection_adapters/abstract/schema_dumper"
 require "active_record/connection_adapters/abstract/schema_creation"
@@ -101,6 +100,19 @@ module ActiveRecord
         @advisory_locks_enabled = self.class.type_cast_config_to_boolean(
           config.fetch(:advisory_locks, true)
         )
+      end
+
+      EXCEPTION_NEVER = { Exception => :never }.freeze # :nodoc:
+      EXCEPTION_IMMEDIATE = { Exception => :immediate }.freeze # :nodoc:
+      private_constant :EXCEPTION_NEVER, :EXCEPTION_IMMEDIATE
+      def with_instrumenter(instrumenter, &block) # :nodoc:
+        Thread.handle_interrupt(EXCEPTION_NEVER) do
+          previous_instrumenter = @instrumenter
+          @instrumenter = instrumenter
+          Thread.handle_interrupt(EXCEPTION_IMMEDIATE, &block)
+        ensure
+          @instrumenter = previous_instrumenter
+        end
       end
 
       def check_if_write_query(sql) # :nodoc:

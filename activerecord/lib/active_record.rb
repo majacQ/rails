@@ -43,6 +43,7 @@ module ActiveRecord
   autoload :CounterCache
   autoload :DynamicMatchers
   autoload :DelegatedType
+  autoload :Encryption
   autoload :Enum
   autoload :InternalMetadata
   autoload :Explain
@@ -67,7 +68,6 @@ module ActiveRecord
   autoload :SchemaMigration
   autoload :Scoping
   autoload :Serialization
-  autoload :StatementCache
   autoload :Store
   autoload :SignedId
   autoload :Suppressor
@@ -79,6 +79,7 @@ module ActiveRecord
   autoload :DestroyAssociationAsyncJob
 
   eager_autoload do
+    autoload :StatementCache
     autoload :ConnectionAdapters
 
     autoload :Aggregations
@@ -92,6 +93,7 @@ module ActiveRecord
 
     autoload :Relation
     autoload :AssociationRelation
+    autoload :DisableJoinsAssociationRelation
     autoload :NullRelation
 
     autoload_under "relation" do
@@ -174,6 +176,7 @@ module ActiveRecord
     ActiveRecord::Associations.eager_load!
     ActiveRecord::AttributeMethods.eager_load!
     ActiveRecord::ConnectionAdapters.eager_load!
+    ActiveRecord::Encryption.eager_load!
   end
 end
 

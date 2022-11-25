@@ -88,7 +88,6 @@ class MigrationTest < ActiveRecord::TestCase
     assert_equal true, migrator.needs_migration?
   end
 
-
   def test_migration_version_matches_component_version
     assert_equal ActiveRecord::VERSION::STRING.to_f, ActiveRecord::Migration.current_version
   end
@@ -1176,6 +1175,42 @@ if ActiveRecord::Base.connection.supports_bulk_alter?
 
       [:qualification, :experience].each { |c| assert_not column(c) }
       assert column(:qualification_experience)
+    end
+
+    def test_adding_timestamps
+      with_bulk_change_table do |t|
+        t.string :title
+      end
+
+      assert column(:title)
+
+      assert_queries(1) do
+        with_bulk_change_table do |t|
+          t.timestamps
+          t.remove :title
+        end
+      end
+
+      [:created_at, :updated_at].each { |c| assert column(c) }
+      assert_not column(:title)
+    end
+
+    def test_removing_timestamps
+      with_bulk_change_table do |t|
+        t.timestamps
+      end
+
+      [:created_at, :updated_at].each { |c| assert column(c) }
+
+      assert_queries(1) do
+        with_bulk_change_table do |t|
+          t.remove_timestamps
+          t.string :title
+        end
+      end
+
+      [:created_at, :updated_at].each { |c| assert_not column(c) }
+      assert column(:title)
     end
 
     def test_adding_indexes

@@ -30,6 +30,7 @@ class Post < ActiveRecord::Base
   scope :containing_the_letter_a, -> { where("body LIKE '%a%'") }
   scope :titled_with_an_apostrophe, -> { where("title LIKE '%''%'") }
   scope :ranked_by_comments, -> { order(table[:comments_count].desc) }
+  scope :ordered_by_post_id, -> { order("posts.post_id ASC") }
 
   scope :limit_by, lambda { |l| limit(l) }
   scope :locked, -> { lock }
@@ -84,6 +85,8 @@ class Post < ActiveRecord::Base
       "hello"
     end
   end
+
+  has_many :comments_with_extending, -> { extending(NamedExtension) }, class_name: "Comment", foreign_key: "post_id"
 
   has_many :comments_with_extend_2, extend: [NamedExtension, NamedExtension2], class_name: "Comment", foreign_key: "post_id"
 
@@ -322,6 +325,10 @@ class FakeKlass
   extend ActiveRecord::Delegation::DelegateCache
 
   class << self
+    def scope_registry
+      ActiveRecord::Scoping::ScopeRegistry.instance
+    end
+
     def connection
       Post.connection
     end

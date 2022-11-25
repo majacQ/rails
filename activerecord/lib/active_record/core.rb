@@ -101,7 +101,7 @@ module ActiveRecord
       ##
       # :singleton-method:
       # Specify whether schema dump should happen at the end of the
-      # db:migrate rails command. This is true by default, which is useful for the
+      # bin/rails db:migrate command. This is true by default, which is useful for the
       # development environment. This should ideally be false in the production
       # environment where dumping schema is rarely needed.
       mattr_accessor :dump_schema_after_migration, instance_writer: false, default: true
@@ -129,6 +129,14 @@ module ActiveRecord
       # for multiple databases.
       mattr_accessor :suppress_multiple_database_warning, instance_writer: false, default: false
 
+      ##
+      # :singleton-method:
+      # Force enumeration of all columns in SELECT statements.
+      # e.g. `SELECT first_name, last_name FROM ...` instead of `SELECT * FROM ...`
+      # This avoids +PreparedStatementCacheExpired+ errors when a column is added
+      # to the database while the app is running.
+      class_attribute :enumerate_columns_in_select_statements, instance_accessor: false, default: false
+
       mattr_accessor :maintain_test_schema, instance_accessor: false
 
       class_attribute :belongs_to_required_by_default, instance_accessor: false
@@ -140,6 +148,7 @@ module ActiveRecord
       mattr_accessor :action_on_strict_loading_violation, instance_accessor: false, default: :raise
 
       class_attribute :strict_loading_by_default, instance_accessor: false, default: false
+      class_attribute :strict_loading_mode, instance_accessor: true, default: :all
 
       mattr_accessor :writing_role, instance_accessor: false, default: :writing
 
@@ -215,7 +224,8 @@ module ActiveRecord
       end
 
       def self.connection_handlers
-        unless legacy_connection_handling
+        if legacy_connection_handling
+        else
           raise NotImplementedError, "The new connection handling does not support accessing multiple connection handlers."
         end
 
@@ -223,7 +233,17 @@ module ActiveRecord
       end
 
       def self.connection_handlers=(handlers)
-        unless legacy_connection_handling
+        if legacy_connection_handling
+          ActiveSupport::Deprecation.warn(<<~MSG)
+            Using legacy connection handling is deprecated. Please set
+            `legacy_connection_handling` to `false` in your application.
+
+            The new connection handling does not support `connection_handlers`
+            getter and setter.
+
+            Read more about how to migrate at: https://guides.rubyonrails.org/active_record_multiple_databases.html#migrate-to-the-new-connection-handling
+          MSG
+        else
           raise NotImplementedError, "The new connection handling does not setting support multiple connection handlers."
         end
 
@@ -466,7 +486,21 @@ module ActiveRecord
       end
 
       # Specifies columns which shouldn't be exposed while calling +#inspect+.
-      attr_writer :filter_attributes
+      def filter_attributes=(filter_attributes)
+        @inspection_filter = nil
+        @filter_attributes = filter_attributes
+      end
+
+      def inspection_filter # :nodoc:
+        if defined?(@filter_attributes)
+          @inspection_filter ||= begin
+            mask = InspectionMask.new(ActiveSupport::ParameterFilter::FILTERED)
+            ActiveSupport::ParameterFilter.new(@filter_attributes, mask: mask)
+          end
+        else
+          superclass.inspection_filter
+        end
+      end
 
       # Returns a string like 'Post(id:integer, title:string, body:text)'
       def inspect # :nodoc:
@@ -721,15 +755,31 @@ module ActiveRecord
     #   user.comments
     #   => ActiveRecord::StrictLoadingViolationError
     #
-    # strict_loading! accepts a boolean argument to specify whether
-    # to enable or disable strict loading mode.
+    # === Parameters:
+    #
+    # * value - Boolean specifying whether to enable or disable strict loading.
+    # * mode - Symbol specifying strict loading mode. Defaults to :all. Using
+    #          :n_plus_one_only mode will only raise an error if an association
+    #          that will lead to an n plus one query is lazily loaded.
+    #
+    # === Example:
     #
     #   user = User.first
     #   user.strict_loading!(false) # => false
     #   user.comments
     #   => #<ActiveRecord::Associations::CollectionProxy>
-    def strict_loading!(value = true)
+    def strict_loading!(value = true, mode: :all)
+      unless [:all, :n_plus_one_only].include?(mode)
+        raise ArgumentError, "The :mode option must be one of [:all, :n_plus_one_only]."
+      end
+
+      @strict_loading_mode = mode
       @strict_loading = value
+    end
+
+    # Returns +true+ if the record uses strict_loading with +:n_plus_one_only+ mode enabled.
+    def strict_loading_n_plus_one_only?
+      @strict_loading_mode == :n_plus_one_only
     end
 
     # Marks this record as read only.
@@ -746,11 +796,11 @@ module ActiveRecord
       # We check defined?(@attributes) not to issue warnings if the object is
       # allocated but not initialized.
       inspection = if defined?(@attributes) && @attributes
-        self.class.attribute_names.collect do |name|
+        self.class.attribute_names.filter_map do |name|
           if _has_attribute?(name)
             "#{name}: #{attribute_for_inspect(name)}"
           end
-        end.compact.join(", ")
+        end.join(", ")
       else
         "not initialized"
       end
@@ -807,16 +857,20 @@ module ActiveRecord
       end
 
       def init_internals
-        @primary_key              = self.class.primary_key
         @readonly                 = false
         @previously_new_record    = false
         @destroyed                = false
         @marked_for_destruction   = false
         @destroyed_by_association = nil
         @_start_transaction_state = nil
-        @strict_loading           = self.class.strict_loading_by_default
 
-        self.class.define_attribute_methods
+        klass = self.class
+
+        @primary_key         = klass.primary_key
+        @strict_loading      = klass.strict_loading_by_default
+        @strict_loading_mode = klass.strict_loading_mode
+
+        klass.define_attribute_methods
       end
 
       def initialize_internals_callback
@@ -834,10 +888,7 @@ module ActiveRecord
       private_constant :InspectionMask
 
       def inspection_filter
-        @inspection_filter ||= begin
-          mask = InspectionMask.new(ActiveSupport::ParameterFilter::FILTERED)
-          ActiveSupport::ParameterFilter.new(self.class.filter_attributes, mask: mask)
-        end
+        self.class.inspection_filter
       end
   end
 end

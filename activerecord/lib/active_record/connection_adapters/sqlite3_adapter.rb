@@ -250,9 +250,17 @@ module ActiveRecord
       def remove_column(table_name, column_name, type = nil, **options) #:nodoc:
         alter_table(table_name) do |definition|
           definition.remove_column column_name
-          definition.foreign_keys.delete_if do |_, fk_options|
-            fk_options[:column] == column_name.to_s
+          definition.foreign_keys.delete_if { |fk| fk.column == column_name.to_s }
+        end
+      end
+
+      def remove_columns(table_name, *column_names, type: nil, **options) # :nodoc:
+        alter_table(table_name) do |definition|
+          column_names.each do |column_name|
+            definition.remove_column column_name
           end
+          column_names = column_names.map(&:to_s)
+          definition.foreign_keys.delete_if { |fk| column_names.include?(fk.column) }
         end
       end
 
@@ -313,8 +321,12 @@ module ActiveRecord
           sql << " ON CONFLICT #{insert.conflict_target} DO NOTHING"
         elsif insert.update_duplicates?
           sql << " ON CONFLICT #{insert.conflict_target} DO UPDATE SET "
-          sql << insert.touch_model_timestamps_unless { |column| "#{column} IS excluded.#{column}" }
-          sql << insert.updatable_columns.map { |column| "#{column}=excluded.#{column}" }.join(",")
+          if insert.raw_update_sql?
+            sql << insert.raw_update_sql
+          else
+            sql << insert.touch_model_timestamps_unless { |column| "#{column} IS excluded.#{column}" }
+            sql << insert.updatable_columns.map { |column| "#{column}=excluded.#{column}" }.join(",")
+          end
         end
 
         sql
