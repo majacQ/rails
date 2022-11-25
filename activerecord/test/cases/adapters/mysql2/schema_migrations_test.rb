@@ -36,11 +36,10 @@ class SchemaMigrationsTest < ActiveRecord::Mysql2TestCase
       assert connection.column_exists?(table_name, :key, :string)
     end
   ensure
-    ActiveRecord::InternalMetadata[:environment] = ActiveRecord::Migrator.current_environment
+    ActiveRecord::InternalMetadata[:environment] = connection.migration_context.current_environment
   end
 
   private
-
     def with_encoding_utf8mb4
       database_name = connection.current_database
       database_info = connection.select_one("SELECT * FROM information_schema.schemata WHERE schema_name = '#{database_name}'")

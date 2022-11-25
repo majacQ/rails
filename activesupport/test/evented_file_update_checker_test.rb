@@ -34,23 +34,23 @@ class EventedFileUpdateCheckerTest < ActiveSupport::TestCase
   end
 
   test "notifies forked processes" do
-    jruby_skip "Forking not available on JRuby"
+    skip "Forking not available" unless Process.respond_to?(:fork)
 
     FileUtils.touch(tmpfiles)
 
-    checker = new_checker(tmpfiles) {}
-    assert !checker.updated?
+    checker = new_checker(tmpfiles) { }
+    assert_not_predicate checker, :updated?
 
     # Pipes used for flow control across fork.
     boot_reader,  boot_writer  = IO.pipe
     touch_reader, touch_writer = IO.pipe
 
     pid = fork do
-      assert checker.updated?
+      assert_predicate checker, :updated?
 
       # Clear previous check value.
       checker.execute
-      assert !checker.updated?
+      assert_not_predicate checker, :updated?
 
       # Fork is booted, ready for file to be touched
       # notify parent process.
@@ -60,7 +60,7 @@ class EventedFileUpdateCheckerTest < ActiveSupport::TestCase
       # has been touched.
       IO.select([touch_reader])
 
-      assert checker.updated?
+      assert_predicate checker, :updated?
     end
 
     assert pid
@@ -72,9 +72,53 @@ class EventedFileUpdateCheckerTest < ActiveSupport::TestCase
     # Notify fork that files have been touched.
     touch_writer.write("touched")
 
-    assert checker.updated?
+    assert_predicate checker, :updated?
 
     Process.wait(pid)
+  end
+
+  test "should detect changes through symlink" do
+    actual_dir = File.join(tmpdir, "actual")
+    linked_dir = File.join(tmpdir, "linked")
+
+    Dir.mkdir(actual_dir)
+    FileUtils.ln_s(actual_dir, linked_dir)
+
+    checker = new_checker([], linked_dir => ".rb") { }
+
+    assert_not_predicate checker, :updated?
+
+    FileUtils.touch(File.join(actual_dir, "a.rb"))
+    wait
+
+    assert_predicate checker, :updated?
+    assert checker.execute_if_updated
+  end
+
+  test "updated should become true when nonexistent directory is added later" do
+    watched_dir = File.join(tmpdir, "app")
+    unwatched_dir = File.join(tmpdir, "node_modules")
+    not_exist_watched_dir = File.join(tmpdir, "test")
+
+    Dir.mkdir(watched_dir)
+    Dir.mkdir(unwatched_dir)
+
+    checker = new_checker([], watched_dir => ".rb", not_exist_watched_dir => ".rb") { }
+
+    FileUtils.touch(File.join(watched_dir, "a.rb"))
+    wait
+    assert_predicate checker, :updated?
+    assert checker.execute_if_updated
+
+    Dir.mkdir(not_exist_watched_dir)
+    wait
+    assert_predicate checker, :updated?
+    assert checker.execute_if_updated
+
+    FileUtils.touch(File.join(unwatched_dir, "a.rb"))
+    wait
+    assert_not_predicate checker, :updated?
+    assert_not checker.execute_if_updated
   end
 end
 

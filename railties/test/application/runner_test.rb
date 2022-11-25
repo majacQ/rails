@@ -105,15 +105,23 @@ module ApplicationTests
       assert_match "development", rails("runner", "puts Rails.env")
     end
 
+    def test_environment_option
+      assert_match "production", rails("runner", "-e", "production", "puts Rails.env")
+    end
+
+    def test_environment_option_is_properly_expanded
+      assert_match "production", rails("runner", "-e", "prod", "puts Rails.env")
+    end
+
     def test_runner_detects_syntax_errors
       output = rails("runner", "puts 'hello world", allow_failure: true)
-      assert_not $?.success?
+      assert_not_predicate $?, :success?
       assert_match "unterminated string meets end of file", output
     end
 
     def test_runner_detects_bad_script_name
       output = rails("runner", "iuiqwiourowe", allow_failure: true)
-      assert_not $?.success?
+      assert_not_predicate $?, :success?
       assert_match "undefined local variable or method `iuiqwiourowe' for", output
     end
 

@@ -26,7 +26,7 @@ class FormTagHelperTest < ActionView::TestCase
     method = options[:method]
     enforce_utf8 = options.fetch(:enforce_utf8, true)
 
-    "".dup.tap do |txt|
+    (+"").tap do |txt|
       if enforce_utf8
         txt << %{<input name="utf8" type="hidden" value="&#x2713;" />}
       end
@@ -42,7 +42,7 @@ class FormTagHelperTest < ActionView::TestCase
 
     method = method.to_s == "get" ? "get" : "post"
 
-    txt =  %{<form accept-charset="UTF-8" action="#{action}"}.dup
+    txt =  +%{<form accept-charset="UTF-8" action="#{action}"}
     txt << %{ enctype="multipart/form-data"} if enctype
     txt << %{ data-remote="true"} if remote
     txt << %{ class="#{html_class}"} if html_class
@@ -142,14 +142,32 @@ class FormTagHelperTest < ActionView::TestCase
     actual = form_tag({}, { enforce_utf8: true })
     expected = whole_form("http://www.example.com", enforce_utf8: true)
     assert_dom_equal expected, actual
-    assert actual.html_safe?
+    assert_predicate actual, :html_safe?
   end
 
   def test_form_tag_enforce_utf8_false
     actual = form_tag({}, { enforce_utf8: false })
     expected = whole_form("http://www.example.com", enforce_utf8: false)
     assert_dom_equal expected, actual
-    assert actual.html_safe?
+    assert_predicate actual, :html_safe?
+  end
+
+  def test_form_tag_default_enforce_utf8_false
+    with_default_enforce_utf8 false do
+      actual = form_tag({})
+      expected = whole_form("http://www.example.com", enforce_utf8: false)
+      assert_dom_equal expected, actual
+      assert_predicate actual, :html_safe?
+    end
+  end
+
+  def test_form_tag_default_enforce_utf8_true
+    with_default_enforce_utf8 true do
+      actual = form_tag({})
+      expected = whole_form("http://www.example.com", enforce_utf8: true)
+      assert_dom_equal expected, actual
+      assert_predicate actual, :html_safe?
+    end
   end
 
   def test_form_tag_with_block_in_erb
@@ -281,6 +299,13 @@ class FormTagHelperTest < ActionView::TestCase
     actual = select_tag "places", raw("<option>Home</option><option>Work</option><option>Pub</option>"), include_blank: true
     expected = %(<select id="places" name="places"><option value="" label=" "></option><option>Home</option><option>Work</option><option>Pub</option></select>)
     assert_dom_equal expected, actual
+  end
+
+  def test_select_tag_with_include_blank_doesnt_change_options
+    options = { include_blank: true, prompt: "string" }
+    expected_options = options.dup
+    select_tag "places", raw("<option>Home</option><option>Work</option><option>Pub</option>"), options
+    expected_options.each { |k, v| assert_equal v, options[k] }
   end
 
   def test_select_tag_with_include_blank_false
@@ -508,6 +533,16 @@ class FormTagHelperTest < ActionView::TestCase
     assert_dom_equal(
       %(<input name='commit' type="submit" value="Save" />),
       submit_tag("Save")
+    )
+  ensure
+    ActionView::Base.automatically_disable_submit_tag = true
+  end
+
+  def test_empty_submit_tag_with_opt_out_and_explicit_disabling
+    ActionView::Base.automatically_disable_submit_tag = false
+    assert_dom_equal(
+      %(<input name='commit' type="submit" value="Save" />),
+      submit_tag("Save", data: { disable_with: false })
     )
   ensure
     ActionView::Base.automatically_disable_submit_tag = true
@@ -778,8 +813,16 @@ class FormTagHelperTest < ActionView::TestCase
   end
 
   private
-
     def root_elem(rendered_content)
       Nokogiri::HTML::DocumentFragment.parse(rendered_content).children.first # extract from nodeset
+    end
+
+    def with_default_enforce_utf8(value)
+      old_value = ActionView::Helpers::FormTagHelper.default_enforce_utf8
+      ActionView::Helpers::FormTagHelper.default_enforce_utf8 = value
+
+      yield
+    ensure
+      ActionView::Helpers::FormTagHelper.default_enforce_utf8 = old_value
     end
 end

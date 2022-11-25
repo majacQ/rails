@@ -82,7 +82,7 @@ class PostgresqlUUIDTest < ActiveRecord::PostgreSQLTestCase
     UUIDType.reset_column_information
     column = UUIDType.columns_hash["thingy"]
 
-    assert column.array?
+    assert_predicate column, :array?
     assert_equal "{}", column.default
 
     schema = dump_table_schema "uuid_data_type"
@@ -93,10 +93,10 @@ class PostgresqlUUIDTest < ActiveRecord::PostgreSQLTestCase
     column = UUIDType.columns_hash["guid"]
     assert_equal :uuid, column.type
     assert_equal "uuid", column.sql_type
-    assert_not column.array?
+    assert_not_predicate column, :array?
 
     type = UUIDType.type_for_attribute("guid")
-    assert_not type.binary?
+    assert_not_predicate type, :binary?
   end
 
   def test_treat_blank_uuid_as_nil
@@ -114,6 +114,22 @@ class PostgresqlUUIDTest < ActiveRecord::PostgreSQLTestCase
     assert_equal "foobar", uuid.guid_before_type_cast
   end
 
+  def test_invalid_uuid_dont_match_to_nil
+    UUIDType.create!
+    assert_empty UUIDType.where(guid: "")
+    assert_empty UUIDType.where(guid: "foobar")
+  end
+
+  class DuckUUID
+    def initialize(uuid)
+      @uuid = uuid
+    end
+
+    def to_s
+      @uuid
+    end
+  end
+
   def test_acceptable_uuid_regex
     # Valid uuids
     ["A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
@@ -125,9 +141,11 @@ class PostgresqlUUIDTest < ActiveRecord::PostgreSQLTestCase
      # so we shouldn't block it either. (Pay attention to "fb6d" – the "f" here
      # is invalid – it must be one of 8, 9, A, B, a, b according to the spec.)
      "{a0eebc99-9c0b-4ef8-fb6d-6bb9bd380a11}",
+     # Support Object-Oriented UUIDs which respond to #to_s
+     DuckUUID.new("A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11"),
     ].each do |valid_uuid|
       uuid = UUIDType.new guid: valid_uuid
-      assert_not_nil uuid.guid
+      assert_instance_of String, uuid.guid
     end
 
     # Invalid uuids
@@ -178,7 +196,7 @@ class PostgresqlUUIDTest < ActiveRecord::PostgreSQLTestCase
     duplicate = klass.new(guid: record.guid)
 
     assert record.guid.present? # Ensure we actually are testing a UUID
-    assert_not duplicate.valid?
+    assert_not_predicate duplicate, :valid?
   end
 end
 
@@ -198,10 +216,10 @@ class PostgresqlUUIDGenerationTest < ActiveRecord::PostgreSQLTestCase
 
     # Create custom PostgreSQL function to generate UUIDs
     # to test dumping tables which columns have defaults with custom functions
-    connection.execute <<-SQL
-    CREATE OR REPLACE FUNCTION my_uuid_generator() RETURNS uuid
-    AS $$ SELECT * FROM #{uuid_function} $$
-    LANGUAGE SQL VOLATILE;
+    connection.execute <<~SQL
+      CREATE OR REPLACE FUNCTION my_uuid_generator() RETURNS uuid
+      AS $$ SELECT * FROM #{uuid_function} $$
+      LANGUAGE SQL VOLATILE;
     SQL
 
     # Create such a table with custom function as default value generator
@@ -275,13 +293,14 @@ class PostgresqlUUIDGenerationTest < ActiveRecord::PostgreSQLTestCase
         create_table("pg_uuids_4", id: :uuid)
       end
     end.new
-    ActiveRecord::Migrator.new(:up, [migration]).migrate
+    ActiveRecord::Migrator.new(:up, [migration], ActiveRecord::Base.connection.schema_migration).migrate
 
     schema = dump_table_schema "pg_uuids_4"
     assert_match(/\bcreate_table "pg_uuids_4", id: :uuid, default: -> { "uuid_generate_v4\(\)" }/, schema)
   ensure
     drop_table "pg_uuids_4"
     ActiveRecord::Migration.verbose = @verbose_was
+    ActiveRecord::Base.connection.schema_migration.delete_all
   end
 end
 
@@ -323,13 +342,14 @@ class PostgresqlUUIDTestNilDefault < ActiveRecord::PostgreSQLTestCase
         create_table("pg_uuids_4", id: :uuid, default: nil)
       end
     end.new
-    ActiveRecord::Migrator.new(:up, [migration]).migrate
+    ActiveRecord::Migrator.new(:up, [migration], ActiveRecord::Base.connection.schema_migration).migrate
 
     schema = dump_table_schema "pg_uuids_4"
     assert_match(/\bcreate_table "pg_uuids_4", id: :uuid, default: nil/, schema)
   ensure
     drop_table "pg_uuids_4"
     ActiveRecord::Migration.verbose = @verbose_was
+    ActiveRecord::Base.connection.schema_migration.delete_all
   end
 end
 

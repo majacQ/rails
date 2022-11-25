@@ -4,6 +4,7 @@ require "cases/helper"
 require "models/binary"
 require "models/author"
 require "models/post"
+require "models/customer"
 
 class SanitizeTest < ActiveRecord::TestCase
   def setup
@@ -72,13 +73,21 @@ class SanitizeTest < ActiveRecord::TestCase
 
   def test_sanitize_sql_like_example_use_case
     searchable_post = Class.new(Post) do
-      def self.search(term)
+      def self.search_as_method(term)
         where("title LIKE ?", sanitize_sql_like(term, "!"))
       end
+
+      scope :search_as_scope, -> (term) {
+        where("title LIKE ?", sanitize_sql_like(term, "!"))
+      }
     end
 
     assert_sql(/LIKE '20!% !_reduction!_!!'/) do
-      searchable_post.search("20% _reduction_!").to_a
+      searchable_post.search_as_method("20% _reduction_!").to_a
+    end
+
+    assert_sql(/LIKE '20!% !_reduction!_!!'/) do
+      searchable_post.search_as_scope("20% _reduction_!").to_a
     end
   end
 
@@ -137,6 +146,19 @@ class SanitizeTest < ActiveRecord::TestCase
     assert_equal quoted_nil, bind("?", [])
     assert_equal " in (#{quoted_nil})", bind(" in (?)", [])
     assert_equal "foo in (#{quoted_nil})", bind("foo in (?)", [])
+  end
+
+  def test_bind_range
+    quoted_abc = %(#{ActiveRecord::Base.connection.quote('a')},#{ActiveRecord::Base.connection.quote('b')},#{ActiveRecord::Base.connection.quote('c')})
+    assert_equal "0", bind("?", 0..0)
+    assert_equal "1,2,3", bind("?", 1..3)
+    assert_equal quoted_abc, bind("?", "a"..."d")
+  end
+
+  def test_bind_empty_range
+    quoted_nil = ActiveRecord::Base.connection.quote(nil)
+    assert_equal quoted_nil, bind("?", 0...0)
+    assert_equal quoted_nil, bind("?", "a"..."a")
   end
 
   def test_bind_empty_string

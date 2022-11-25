@@ -203,17 +203,25 @@ class PrimaryKeysTest < ActiveRecord::TestCase
     assert_queries(3, ignore_none: true) { klass.create! }
   end
 
+  def test_assign_id_raises_error_if_primary_key_doesnt_exist
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "dashboards"
+    end
+    dashboard = klass.new
+    assert_raises(ActiveModel::MissingAttributeError) { dashboard.id = "1" }
+  end
+
   if current_adapter?(:PostgreSQLAdapter)
     def test_serial_with_quoted_sequence_name
       column = MixedCaseMonkey.columns_hash[MixedCaseMonkey.primary_key]
       assert_equal "nextval('\"mixed_case_monkeys_monkeyID_seq\"'::regclass)", column.default_function
-      assert column.serial?
+      assert_predicate column, :serial?
     end
 
     def test_serial_with_unquoted_sequence_name
       column = Topic.columns_hash[Topic.primary_key]
       assert_equal "nextval('topics_id_seq'::regclass)", column.default_function
-      assert column.serial?
+      assert_predicate column, :serial?
     end
   end
 end
@@ -305,6 +313,7 @@ class PrimaryKeyAnyTypeTest < ActiveRecord::TestCase
   test "schema dump primary key includes type and options" do
     schema = dump_table_schema "barcodes"
     assert_match %r{create_table "barcodes", primary_key: "code", id: :string, limit: 42}, schema
+    assert_no_match %r{t\.index \["code"\]}, schema
   end
 
   if current_adapter?(:Mysql2Adapter) && subsecond_precision_supported?
@@ -353,7 +362,6 @@ class CompositePrimaryKeyTest < ActiveRecord::TestCase
   end
 
   def test_composite_primary_key_out_of_order
-    skip if current_adapter?(:SQLite3Adapter)
     assert_equal ["code", "region"], @connection.primary_keys("barcodes_reverse")
   end
 
@@ -375,7 +383,6 @@ class CompositePrimaryKeyTest < ActiveRecord::TestCase
   end
 
   def test_dumping_composite_primary_key_out_of_order
-    skip if current_adapter?(:SQLite3Adapter)
     schema = dump_table_schema "barcodes_reverse"
     assert_match %r{create_table "barcodes_reverse", primary_key: \["code", "region"\]}, schema
   end
@@ -430,7 +437,7 @@ if current_adapter?(:PostgreSQLAdapter, :Mysql2Adapter)
       @connection.create_table(:widgets, id: @pk_type, force: true)
       column = @connection.columns(:widgets).find { |c| c.name == "id" }
       assert_equal :integer, column.type
-      assert_not column.bigint?
+      assert_not_predicate column, :bigint?
     end
 
     test "primary key with serial/integer are automatically numbered" do
@@ -449,10 +456,10 @@ if current_adapter?(:PostgreSQLAdapter, :Mysql2Adapter)
       test "primary key column type with options" do
         @connection.create_table(:widgets, id: :primary_key, limit: 4, unsigned: true, force: true)
         column = @connection.columns(:widgets).find { |c| c.name == "id" }
-        assert column.auto_increment?
+        assert_predicate column, :auto_increment?
         assert_equal :integer, column.type
-        assert_not column.bigint?
-        assert column.unsigned?
+        assert_not_predicate column, :bigint?
+        assert_predicate column, :unsigned?
 
         schema = dump_table_schema "widgets"
         assert_match %r{create_table "widgets", id: :integer, unsigned: true, }, schema
@@ -461,10 +468,10 @@ if current_adapter?(:PostgreSQLAdapter, :Mysql2Adapter)
       test "bigint primary key with unsigned" do
         @connection.create_table(:widgets, id: :bigint, unsigned: true, force: true)
         column = @connection.columns(:widgets).find { |c| c.name == "id" }
-        assert column.auto_increment?
+        assert_predicate column, :auto_increment?
         assert_equal :integer, column.type
-        assert column.bigint?
-        assert column.unsigned?
+        assert_predicate column, :bigint?
+        assert_predicate column, :unsigned?
 
         schema = dump_table_schema "widgets"
         assert_match %r{create_table "widgets", id: :bigint, unsigned: true, }, schema

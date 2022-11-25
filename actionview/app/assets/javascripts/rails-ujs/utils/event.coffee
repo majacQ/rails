@@ -11,13 +11,23 @@ if typeof CustomEvent isnt 'function'
     evt = document.createEvent('CustomEvent')
     evt.initCustomEvent(event, params.bubbles, params.cancelable, params.detail)
     evt
+
   CustomEvent.prototype = window.Event.prototype
+
+  # Fix setting `defaultPrevented` when `preventDefault()` is called
+  # http://stackoverflow.com/questions/23349191/event-preventdefault-is-not-working-in-ie-11-for-custom-events
+  { preventDefault } = CustomEvent.prototype
+  CustomEvent.prototype.preventDefault = ->
+    result = preventDefault.call(this)
+    if @cancelable and not @defaultPrevented
+      Object.defineProperty(this, 'defaultPrevented', get: -> true)
+    result
 
 # Triggers a custom event on an element and returns false if the event result is false
 # obj::
 #   a native DOM element
 # name::
-#   string that corrspends to the event you want to trigger
+#   string that corresponds to the event you want to trigger
 #   e.g. 'click', 'submit'
 # data::
 #   data you want to pass when you dispatch an event

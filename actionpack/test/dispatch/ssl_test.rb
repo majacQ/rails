@@ -9,7 +9,7 @@ class SSLTest < ActionDispatch::IntegrationTest
 
   def build_app(headers: {}, ssl_options: {})
     headers = HEADERS.merge(headers)
-    ActionDispatch::SSL.new lambda { |env| [200, headers, []] }, ssl_options.reverse_merge(hsts: { subdomains: true })
+    ActionDispatch::SSL.new lambda { |env| [200, headers, []] }, **ssl_options.reverse_merge(hsts: { subdomains: true })
   end
 end
 
@@ -98,8 +98,8 @@ class RedirectSSLTest < SSLTest
 end
 
 class StrictTransportSecurityTest < SSLTest
-  EXPECTED = "max-age=15552000"
-  EXPECTED_WITH_SUBDOMAINS = "max-age=15552000; includeSubDomains"
+  EXPECTED = "max-age=31536000"
+  EXPECTED_WITH_SUBDOMAINS = "max-age=31536000; includeSubDomains"
 
   def assert_hsts(expected, url: "https://example.org", hsts: { subdomains: true }, headers: {})
     self.app = build_app ssl_options: { hsts: hsts }, headers: headers
@@ -208,13 +208,21 @@ class SecureCookiesTest < SSLTest
     assert_cookies(*DEFAULT.split("\n"))
   end
 
+  def test_cookies_as_not_secure_with_exclude
+    excluding = { exclude: -> request { request.domain =~ /example/ } }
+    get headers: { "Set-Cookie" => DEFAULT }, ssl_options: { redirect: excluding }
+
+    assert_cookies(*DEFAULT.split("\n"))
+    assert_response :ok
+  end
+
   def test_no_cookies
     get
     assert_nil response.headers["Set-Cookie"]
   end
 
   def test_keeps_original_headers_behavior
-    get headers: { "Connection" => %w[close] }
+    get headers: { "Connection" => "close" }
     assert_equal "close", response.headers["Connection"]
   end
 end

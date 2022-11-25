@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "support/schema_dumping_helper"
+require "pp"
 
 module JSONSharedTestCases
   include SchemaDumpingHelper
@@ -26,7 +27,7 @@ module JSONSharedTestCases
     assert_type_match column_type, column.sql_type
 
     type = klass.type_for_attribute("payload")
-    assert_not type.binary?
+    assert_not_predicate type, :binary?
   end
 
   def test_change_table_supports_json
@@ -101,7 +102,7 @@ module JSONSharedTestCases
     x = klass.where(payload: nil).first
     assert_nil(x)
 
-    json.update_attributes(payload: nil)
+    json.update(payload: nil)
     x = klass.where(payload: nil).first
     assert_equal(json.reload, x)
   end
@@ -152,42 +153,42 @@ module JSONSharedTestCases
 
   def test_changes_in_place
     json = klass.new
-    assert_not json.changed?
+    assert_not_predicate json, :changed?
 
     json.payload = { "one" => "two" }
-    assert json.changed?
-    assert json.payload_changed?
+    assert_predicate json, :changed?
+    assert_predicate json, :payload_changed?
 
     json.save!
-    assert_not json.changed?
+    assert_not_predicate json, :changed?
 
     json.payload["three"] = "four"
-    assert json.payload_changed?
+    assert_predicate json, :payload_changed?
 
     json.save!
     json.reload
 
     assert_equal({ "one" => "two", "three" => "four" }, json.payload)
-    assert_not json.changed?
+    assert_not_predicate json, :changed?
   end
 
   def test_changes_in_place_ignores_key_order
     json = klass.new
-    assert_not json.changed?
+    assert_not_predicate json, :changed?
 
     json.payload = { "three" => "four", "one" => "two" }
     json.save!
     json.reload
 
     json.payload = { "three" => "four", "one" => "two" }
-    assert_not json.changed?
+    assert_not_predicate json, :changed?
 
     json.payload = [{ "three" => "four", "one" => "two" }, { "seven" => "eight", "five" => "six" }]
     json.save!
     json.reload
 
     json.payload = [{ "three" => "four", "one" => "two" }, { "seven" => "eight", "five" => "six" }]
-    assert_not json.changed?
+    assert_not_predicate json, :changed?
   end
 
   def test_changes_in_place_with_ruby_object
@@ -195,10 +196,10 @@ module JSONSharedTestCases
     json = klass.create!(payload: time)
 
     json.reload
-    assert_not json.changed?
+    assert_not_predicate json, :changed?
 
     json.payload = time
-    assert_not json.changed?
+    assert_not_predicate json, :changed?
   end
 
   def test_assigning_string_literal
@@ -247,6 +248,25 @@ module JSONSharedTestCases
     record.save!
 
     assert_equal({ "three" => "four" }, record.reload.settings.to_hash)
+  end
+
+  class JsonDataTypeWithFilter < ActiveRecord::Base
+    self.table_name = "json_data_type"
+
+    attribute :payload, :json
+
+    def self.filter_attributes
+      # Rails.application.config.filter_parameters += [:password]
+      super + [:password]
+    end
+  end
+
+  def test_pretty_print
+    x = JsonDataTypeWithFilter.create!(payload: {})
+    x.payload[11] = "foo"
+    io = StringIO.new
+    PP.pp(x, io)
+    assert io.string
   end
 
   private

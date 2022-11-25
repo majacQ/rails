@@ -11,6 +11,11 @@ class RequestIdTest < ActiveSupport::TestCase
     assert_equal "X-Hacked-HeaderStuff", stub_request("HTTP_X_REQUEST_ID" => "; X-Hacked-Header: Stuff").request_id
   end
 
+  test "accept Apache mod_unique_id format" do
+    mod_unique_id = "abcxyz@ABCXYZ-0123456789"
+    assert_equal mod_unique_id, stub_request("HTTP_X_REQUEST_ID" => mod_unique_id).request_id
+  end
+
   test "ensure that 255 char limit on the request id is being enforced" do
     assert_equal "X" * 255, stub_request("HTTP_X_REQUEST_ID" => "X" * 500).request_id
   end
@@ -24,7 +29,6 @@ class RequestIdTest < ActiveSupport::TestCase
   end
 
   private
-
     def stub_request(env = {})
       ActionDispatch::RequestId.new(lambda { |environment| [ 200, environment, [] ] }).call(env)
       ActionDispatch::Request.new(env)
@@ -53,7 +57,6 @@ class RequestIdResponseTest < ActionDispatch::IntegrationTest
   end
 
   private
-
     def with_test_route_set
       with_routing do |set|
         set.draw do

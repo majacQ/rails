@@ -224,12 +224,6 @@ class InflectorTest < ActiveSupport::TestCase
     assert_equal("json_html_api", ActiveSupport::Inflector.underscore("JSONHTMLAPI"))
   end
 
-  def test_acronym_regexp_is_deprecated
-    assert_deprecated do
-      ActiveSupport::Inflector.inflections.acronym_regex
-    end
-  end
-
   def test_underscore
     CamelToUnderscore.each do |camel, underscore|
       assert_equal(underscore, ActiveSupport::Inflector.underscore(camel))
@@ -308,6 +302,12 @@ class InflectorTest < ActiveSupport::TestCase
     StringToParameterized.each do |some_string, parameterized_string|
       assert_equal(parameterized_string.gsub("-", "__sep__"), ActiveSupport::Inflector.parameterize(some_string, separator: "__sep__"))
     end
+  end
+
+  def test_parameterize_with_locale
+    word = "Fünf autos"
+    I18n.backend.store_translations(:de, i18n: { transliterate: { rule: { "ü" => "ue" } } })
+    assert_equal("fuenf-autos", ActiveSupport::Inflector.parameterize(word, locale: :de))
   end
 
   def test_classify
@@ -460,12 +460,12 @@ class InflectorTest < ActiveSupport::TestCase
 
     ActiveSupport::Inflector.inflections(:es) { |inflect| inflect.clear }
 
-    assert ActiveSupport::Inflector.inflections(:es).plurals.empty?
-    assert ActiveSupport::Inflector.inflections(:es).singulars.empty?
-    assert ActiveSupport::Inflector.inflections(:es).uncountables.empty?
-    assert !ActiveSupport::Inflector.inflections.plurals.empty?
-    assert !ActiveSupport::Inflector.inflections.singulars.empty?
-    assert !ActiveSupport::Inflector.inflections.uncountables.empty?
+    assert_empty ActiveSupport::Inflector.inflections(:es).plurals
+    assert_empty ActiveSupport::Inflector.inflections(:es).singulars
+    assert_empty ActiveSupport::Inflector.inflections(:es).uncountables
+    assert_not_empty ActiveSupport::Inflector.inflections.plurals
+    assert_not_empty ActiveSupport::Inflector.inflections.singulars
+    assert_not_empty ActiveSupport::Inflector.inflections.uncountables
   end
 
   def test_clear_all
@@ -478,10 +478,10 @@ class InflectorTest < ActiveSupport::TestCase
 
       inflect.clear :all
 
-      assert inflect.plurals.empty?
-      assert inflect.singulars.empty?
-      assert inflect.uncountables.empty?
-      assert inflect.humans.empty?
+      assert_empty inflect.plurals
+      assert_empty inflect.singulars
+      assert_empty inflect.uncountables
+      assert_empty inflect.humans
     end
   end
 
@@ -495,10 +495,10 @@ class InflectorTest < ActiveSupport::TestCase
 
       inflect.clear
 
-      assert inflect.plurals.empty?
-      assert inflect.singulars.empty?
-      assert inflect.uncountables.empty?
-      assert inflect.humans.empty?
+      assert_empty inflect.plurals
+      assert_empty inflect.singulars
+      assert_empty inflect.uncountables
+      assert_empty inflect.humans
     end
   end
 

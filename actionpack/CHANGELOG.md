@@ -1,243 +1,405 @@
-*   Changed the system tests to set Puma as default server only when the
-    user haven't specified manually another server.
+*   Signed and encrypted cookies can now store `false` as their value when
+    `action_dispatch.use_cookies_with_metadata` is enabled.
 
-    *Guillermo Iguaran*
-
-*   Add secure `X-Download-Options` and `X-Permitted-Cross-Domain-Policies` to
-    default headers set.
-
-    *Guillermo Iguaran*
-
-*   Add headless firefox support to System Tests.
-
-    *bogdanvlviv*
-
-*   Changed the default system test screenshot output from `inline` to `simple`.
-
-    `inline` works well for iTerm2 but not everyone uses iTerm2. Some terminals like
-    Terminal.app ignore the `inline` and output the path to the file since it can't
-    render the image. Other terminals, like those on Ubuntu, cannot handle the image
-    inline, but also don't handle it gracefully and instead of outputting the file
-    path, it dumps binary into the terminal.
-
-    Commit 9d6e28 fixes this by changing the default for screenshot to be `simple`.
-
-    *Eileen M. Uchitelle*
-
-*   Register most popular audio/video/font mime types supported by modern browsers.
-
-    *Guillermo Iguaran*
-
-*   Fix optimized url helpers when using relative url root
-
-    Fixes #31220.
-
-    *Andrew White*
+    *Rolandas Barysas*
 
 
-## Rails 5.2.0.beta2 (November 28, 2017) ##
+## Rails 6.0.3.5 (February 10, 2021) ##
+
+*   Prevent open redirect when allowed host starts with a dot
+
+    [CVE-2021-22881]
+
+    Thanks to @tktech (https://hackerone.com/tktech) for reporting this
+    issue and the patch!
+
+    *Aaron Patterson*
+
+
+## Rails 6.0.3.4 (October 07, 2020) ##
+
+*   [CVE-2020-8264] Prevent XSS in Actionable Exceptions
+
+
+## Rails 6.0.3.3 (September 09, 2020) ##
 
 *   No changes.
 
 
-## Rails 5.2.0.beta1 (November 27, 2017) ##
+## Rails 6.0.3.2 (June 17, 2020) ##
 
-*   Add DSL for configuring Content-Security-Policy header
+*   [CVE-2020-8185] Only allow ActionableErrors if show_detailed_exceptions is enabled
 
-    The DSL allows you to configure a global Content-Security-Policy
-    header and then override within a controller. For more information
-    about the Content-Security-Policy header see MDN:
+## Rails 6.0.3.1 (May 18, 2020) ##
 
-    https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy
+*   [CVE-2020-8166] HMAC raw CSRF token before masking it, so it cannot be used to reconstruct a per-form token
 
-    Example global policy:
+*   [CVE-2020-8164] Return self when calling #each, #each_pair, and #each_value instead of the raw @parameters hash
 
-        # config/initializers/content_security_policy.rb
-        Rails.application.config.content_security_policy do |p|
-          p.default_src :self, :https
-          p.font_src    :self, :https, :data
-          p.img_src     :self, :https, :data
-          p.object_src  :none
-          p.script_src  :self, :https
-          p.style_src   :self, :https, :unsafe_inline
-        end
 
-    Example controller overrides:
+## Rails 6.0.3 (May 06, 2020) ##
 
-        # Override policy inline
-        class PostsController < ApplicationController
-          content_security_policy do |p|
-            p.upgrade_insecure_requests true
-          end
-        end
+*   Include child session assertion count in ActionDispatch::IntegrationTest
 
-        # Using literal values
-        class PostsController < ApplicationController
-          content_security_policy do |p|
-            p.base_uri "https://www.example.com"
-          end
-        end
+    `IntegrationTest#open_session` uses `dup` to create the new session, which
+    meant it had its own copy of `@assertions`. This prevented the assertions
+    from being correctly counted and reported.
 
-        # Using mixed static and dynamic values
-        class PostsController < ApplicationController
-          content_security_policy do |p|
-            p.base_uri :self, -> { "https://#{current_user.domain}.example.com" }
-          end
-        end
+    Child sessions now have their `attr_accessor` overriden to delegate to the
+    root session.
 
-    Allows you to also only report content violations for migrating
-    legacy content using the `content_security_policy_report_only`
-    configuration attribute, e.g;
+    Fixes #32142
 
-        # config/initializers/content_security_policy.rb
-        Rails.application.config.content_security_policy_report_only = true
+    *Sam Bostock*
 
-        # controller override
-        class PostsController < ApplicationController
-          self.content_security_policy_report_only = true
-        end
 
-    Note that this feature does not validate the header for performance
-    reasons since the header is calculated at runtime.
+## Rails 6.0.2.2 (March 19, 2020) ##
 
-    *Andrew White*
+*   No changes.
 
-*   Make `assert_recognizes` to traverse mounted engines
 
-    *Yuichiro Kaneko*
+## Rails 6.0.2.1 (December 18, 2019) ##
 
-*   Remove deprecated `ActionController::ParamsParser::ParseError`.
+*   Fix possible information leak / session hijacking vulnerability.
+
+    The `ActionDispatch::Session::MemcacheStore` is still vulnerable given it requires the
+    gem dalli to be updated as well.
+
+    CVE-2019-16782.
+
+
+## Rails 6.0.2 (December 13, 2019) ##
+
+*   Allow using mountable engine route helpers in System Tests.
+
+    *Chalo Fernandez*
+
+
+## Rails 6.0.1 (November 5, 2019) ##
+
+*   `ActionDispatch::SystemTestCase` now inherits from `ActiveSupport::TestCase`
+    rather than `ActionDispatch::IntegrationTest`. This permits running jobs in
+    system tests.
+
+    *George Claghorn*, *Edouard Chin*
+
+*   Registered MIME types may contain extra flags:
+
+    ```ruby
+    Mime::Type.register "text/html; fragment", :html_fragment
+    ```
+
+    *Aaron Patterson*
+
+
+## Rails 6.0.0 (August 16, 2019) ##
+
+*   No changes.
+
+
+## Rails 6.0.0.rc2 (July 22, 2019) ##
+
+*   Add the ability to set the CSP nonce only to the specified directives.
+
+    Fixes #35137.
+
+    *Yuji Yaginuma*
+
+*   Keep part when scope option has value.
+
+    When a route was defined within an optional scope, if that route didn't
+    take parameters the scope was lost when using path helpers. This commit
+    ensures scope is kept both when the route takes parameters or when it
+    doesn't.
+
+    Fixes #33219
+
+    *Alberto Almagro*
+
+*   Change `ActionDispatch::Response#content_type` to return Content-Type header as it is.
+
+    Previously, `ActionDispatch::Response#content_type` returned value does NOT
+    contain charset part. This behavior changed to returned Content-Type header
+    containing charset part as it is.
+
+    If you want just MIME type, please use `ActionDispatch::Response#media_type`
+    instead.
+
+    Enable `action_dispatch.return_only_media_type_on_content_type` to use this change.
+    If not enabled, `ActionDispatch::Response#content_type` returns the same
+    value as before version, but its behavior is deprecate.
+
+    *Yuji Yaginuma*
+
+*   Calling `ActionController::Parameters#transform_keys/!` without a block now returns
+    an enumerator for the parameters instead of the underlying hash.
+
+    *Eugene Kenny*
+
+*   Fix a bug where DebugExceptions throws an error when malformed query parameters are provided
+
+    *Yuki Nishijima*, *Stan Lo*
+
+
+## Rails 6.0.0.rc1 (April 24, 2019) ##
+
+*   Make system tests take a failed screenshot in a `before_teardown` hook
+    rather than an `after_teardown` hook.
+
+    This helps minimize the time gap between when an assertion fails and when
+    the screenshot is taken (reducing the time in which the page could have
+    been dynamically updated after the assertion failed).
+
+    *Richard Macklin*
+
+*   Introduce `ActionDispatch::ActionableExceptions`.
+
+    The `ActionDispatch::ActionableExceptions` middleware dispatches actions
+    from `ActiveSupport::ActionableError` descendants.
+
+    Actionable errors let's you dispatch actions from Rails' error pages.
+
+    *Vipul A M*, *Yao Jie*, *Genadi Samokovarov*
+
+*   Raise an `ArgumentError` if a resource custom param contains a colon (`:`).
+
+    After this change it's not possible anymore to configure routes like this:
+
+    ```
+    routes.draw do
+      resources :users, param: 'name/:sneaky'
+    end
+    ```
+
+    Fixes #30467.
+
+    *Josua Schmid*
+
+
+## Rails 6.0.0.beta3 (March 11, 2019) ##
+
+*   No changes.
+
+
+## Rails 6.0.0.beta2 (February 25, 2019) ##
+
+*   Make debug exceptions works in an environment where ActiveStorage is not loaded.
+
+    *Tomoyuki Kurosawa*
+
+*   `ActionDispatch::SystemTestCase.driven_by` can now be called with a block
+    to define specific browser capabilities.
+
+    *Edouard Chin*
+
+
+## Rails 6.0.0.beta1 (January 18, 2019) ##
+
+*   Remove deprecated `fragment_cache_key` helper in favor of `combined_fragment_cache_key`.
 
     *Rafael Mendonça França*
 
-*   Add `:allow_other_host` option to `redirect_back` method.
+*   Remove deprecated methods in `ActionDispatch::TestResponse`.
 
-    When `allow_other_host` is set to `false`, the `redirect_back` will not allow redirecting from a
-    different host. `allow_other_host` is `true` by default.
+    `#success?`, `missing?` and `error?` were deprecated in Rails 5.2 in favor of
+    `#successful?`, `not_found?` and `server_error?`.
 
-    *Tim Masliuchenko*
+    *Rafael Mendonça França*
 
-*   Add headless chrome support to System Tests.
+*   Introduce `ActionDispatch::HostAuthorization`.
 
-    *Yuji Yaginuma*
+    This is a new middleware that guards against DNS rebinding attacks by
+    explicitly permitting the hosts a request can be made to.
 
-*   Add ability to enable Early Hints for HTTP/2
+    Each host is checked with the case operator (`#===`) to support `Regexp`,
+    `Proc`, `IPAddr` and custom objects as host allowances.
 
-    If supported by the server, and enabled in Puma this allows H2 Early Hints to be used.
+    *Genadi Samokovarov*
 
-    The `javascript_include_tag` and the `stylesheet_link_tag` automatically add Early Hints if requested.
+*   Allow using `parsed_body` in `ActionController::TestCase`.
 
-    *Eileen M. Uchitelle*, *Aaron Patterson*
+    In addition to `ActionDispatch::IntegrationTest`, allow using
+    `parsed_body` in `ActionController::TestCase`:
 
-*   Simplify cookies middleware with key rotation support
+    ```
+    class SomeControllerTest < ActionController::TestCase
+      def test_some_action
+        post :action, body: { foo: 'bar' }
+        assert_equal({ "foo" => "bar" }, response.parsed_body)
+      end
+    end
+    ```
 
-    Use the `rotate` method for both `MessageEncryptor` and
-    `MessageVerifier` to add key rotation support for encrypted and
-    signed cookies. This also helps simplify support for legacy cookie
-    security.
+    Fixes #34676.
 
-    *Michael J Coyne*
+    *Tobias Bühlmann*
 
-*   Use Capybara registered `:puma` server config.
+*   Raise an error on root route naming conflicts.
 
-    The Capybara registered `:puma` server ensures the puma server is run in process so
-    connection sharing and open request detection work correctly by default.
+    Raises an `ArgumentError` when multiple root routes are defined in the
+    same context instead of assigning nil names to subsequent roots.
 
-    *Thomas Walpole*
+    *Gannon McGibbon*
 
-*   Cookies `:expires` option supports `ActiveSupport::Duration` object.
+*   Allow rescue from parameter parse errors:
 
-        cookies[:user_name] = { value: "assain", expires: 1.hour }
-        cookies[:key] = { value: "a yummy cookie", expires: 6.months }
+    ```
+    rescue_from ActionDispatch::Http::Parameters::ParseError do
+      head :unauthorized
+    end
+    ```
 
-    Pull Request: #30121
+    *Gannon McGibbon*, *Josh Cheek*
+
+*   Reset Capybara sessions if failed system test screenshot raising an exception.
+
+    Reset Capybara sessions if `take_failed_screenshot` raise exception
+    in system test `after_teardown`.
+
+    *Maxim Perepelitsa*
+
+*   Use request object for context if there's no controller
+
+    There is no controller instance when using a redirect route or a
+    mounted rack application so pass the request object as the context
+    when resolving dynamic CSP sources in this scenario.
+
+    Fixes #34200.
+
+    *Andrew White*
+
+*   Apply mapping to symbols returned from dynamic CSP sources
+
+    Previously if a dynamic source returned a symbol such as :self it
+    would be converted to a string implicitly, e.g:
+
+        policy.default_src -> { :self }
+
+    would generate the header:
+
+        Content-Security-Policy: default-src self
+
+    and now it generates:
+
+        Content-Security-Policy: default-src 'self'
+
+    *Andrew White*
+
+*   Add `ActionController::Parameters#each_value`.
+
+    *Lukáš Zapletal*
+
+*   Deprecate `ActionDispatch::Http::ParameterFilter` in favor of `ActiveSupport::ParameterFilter`.
+
+    *Yoshiyuki Kinjo*
+
+*   Encode Content-Disposition filenames on `send_data` and `send_file`.
+    Previously, `send_data 'data', filename: "\u{3042}.txt"` sends
+    `"filename=\"\u{3042}.txt\""` as Content-Disposition and it can be
+    garbled.
+    Now it follows [RFC 2231](https://tools.ietf.org/html/rfc2231) and
+    [RFC 5987](https://tools.ietf.org/html/rfc5987) and sends
+    `"filename=\"%3F.txt\"; filename*=UTF-8''%E3%81%82.txt"`.
+    Most browsers can find filename correctly and old browsers fallback to ASCII
+    converted name.
+
+    *Fumiaki Matsushima*
+
+*   Expose `ActionController::Parameters#each_key` which allows iterating over
+    keys without allocating an array.
+
+    *Richard Schneeman*
+
+*   Purpose metadata for signed/encrypted cookies.
+
+    Rails can now thwart attacks that attempt to copy signed/encrypted value
+    of a cookie and use it as the value of another cookie.
+
+    It does so by stashing the cookie-name in the purpose field which is
+    then signed/encrypted along with the cookie value. Then, on a server-side
+    read, we verify the cookie-names and discard any attacked cookies.
+
+    Enable `action_dispatch.use_cookies_with_metadata` to use this feature, which
+    writes cookies with the new purpose and expiry metadata embedded.
 
     *Assain Jaleel*
 
-*   Enforce signed/encrypted cookie expiry server side.
+*   Raises `ActionController::RespondToMismatchError` with conflicting `respond_to` invocations.
 
-    Rails can thwart attacks by malicious clients that don't honor a cookie's expiry.
+    `respond_to` can match multiple types and lead to undefined behavior when
+    multiple invocations are made and the types do not match:
 
-    It does so by stashing the expiry within the written cookie and relying on the
-    signing/encrypting to vouch that it hasn't been tampered with. Then on a
-    server-side read, the expiry is verified and any expired cookie is discarded.
+        respond_to do |outer_type|
+          outer_type.js do
+            respond_to do |inner_type|
+              inner_type.html { render body: "HTML" }
+            end
+          end
+        end
 
-    Pull Request: #30121
+    *Patrick Toomey*
 
-    *Assain Jaleel*
+*   `ActionDispatch::Http::UploadedFile` now delegates `to_path` to its tempfile.
 
-*   Make `take_failed_screenshot` work within engine.
+    This allows uploaded file objects to be passed directly to `File.read`
+    without raising a `TypeError`:
 
-    Fixes #30405.
+        uploaded_file = ActionDispatch::Http::UploadedFile.new(tempfile: tmp_file)
+        File.read(uploaded_file)
 
-    *Yuji Yaginuma*
+    *Aaron Kromer*
 
-*   Deprecate `ActionDispatch::TestResponse` response aliases
+*   Pass along arguments to underlying `get` method in `follow_redirect!`
 
-    `#success?`, `#missing?` & `#error?` are not supported by the actual
-    `ActionDispatch::Response` object and can produce false-positives. Instead,
-    use the response helpers provided by `Rack::Response`.
+    Now all arguments passed to `follow_redirect!` are passed to the underlying
+    `get` method. This for example allows to set custom headers for the
+    redirection request to the server.
 
-    *Trevor Wistaff*
+        follow_redirect!(params: { foo: :bar })
 
-*   Protect from forgery by default
+    *Remo Fritzsche*
 
-    Rather than protecting from forgery in the generated `ApplicationController`,
-    add it to `ActionController::Base` depending on
-    `config.action_controller.default_protect_from_forgery`. This configuration
-    defaults to false to support older versions which have removed it from their
-    `ApplicationController`, but is set to true for Rails 5.2.
+*   Introduce a new error page to when the implicit render page is accessed in the browser.
 
-    *Lisa Ugray*
+    Now instead of showing an error page that with exception and backtraces we now show only
+    one informative page.
 
-*   Fallback `ActionController::Parameters#to_s` to `Hash#to_s`.
+    *Vinicius Stock*
 
-    *Kir Shatrov*
+*   Introduce `ActionDispatch::DebugExceptions.register_interceptor`.
 
-*   `driven_by` now registers poltergeist and capybara-webkit.
+    Exception aware plugin authors can use the newly introduced
+    `.register_interceptor` method to get the processed exception, instead of
+    monkey patching DebugExceptions.
 
-    If poltergeist or capybara-webkit are set as drivers is set for System Tests,
-    `driven_by` will register the driver and set additional options passed via
-    the `:options` parameter.
+        ActionDispatch::DebugExceptions.register_interceptor do |request, exception|
+          HypoteticalPlugin.capture_exception(request, exception)
+        end
 
-    Refer to the respective driver's documentation to see what options can be passed.
+    *Genadi Samokovarov*
 
-    *Mario Chavez*
+*   Output only one Content-Security-Policy nonce header value per request.
 
-*   AEAD encrypted cookies and sessions with GCM.
+    Fixes #32597.
 
-    Encrypted cookies now use AES-GCM which couples authentication and
-    encryption in one faster step and produces shorter ciphertexts. Cookies
-    encrypted using AES in CBC HMAC mode will be seamlessly upgraded when
-    this new mode is enabled via the
-    `action_dispatch.use_authenticated_cookie_encryption` configuration value.
+    *Andrey Novikov*, *Andrew White*
 
-    *Michael J Coyne*
+*   Move default headers configuration into their own module that can be included in controllers.
 
-*   Change the cache key format for fragments to make it easier to debug key churn. The new format is:
+    *Kevin Deisz*
 
-        views/template/action.html.erb:7a1156131a6928cb0026877f8b749ac9/projects/123
-              ^template path           ^template tree digest            ^class   ^id
+*   Add method `dig` to `session`.
 
-    *DHH*
+    *claudiob*, *Takumi Shotoku*
 
-*   Add support for recyclable cache keys with fragment caching. This uses the new versioned entries in the
-    `ActiveSupport::Cache` stores and relies on the fact that Active Record has split `#cache_key` and `#cache_version`
-    to support it.
+*   Controller level `force_ssl` has been deprecated in favor of
+    `config.force_ssl`.
 
-    *DHH*
+    *Derek Prior*
 
-*   Add `action_controller_api` and `action_controller_base` load hooks to be called in `ActiveSupport.on_load`
+*   Rails 6 requires Ruby 2.5.0 or newer.
 
-    `ActionController::Base` and `ActionController::API` have differing implementations. This means that
-    the one umbrella hook `action_controller` is not able to address certain situations where a method
-    may not exist in a certain implementation.
-
-    This is fixed by adding two new hooks so you can target `ActionController::Base` vs `ActionController::API`
-
-    Fixes #27013.
-
-    *Julian Nadeau*
+    *Jeremy Daer*, *Kasper Timm Hansen*
 
 
-Please check [5-1-stable](https://github.com/rails/rails/blob/5-1-stable/actionpack/CHANGELOG.md) for previous changes.
+Please check [5-2-stable](https://github.com/rails/rails/blob/5-2-stable/actionpack/CHANGELOG.md) for previous changes.

@@ -6,7 +6,7 @@ module ActionView
   # = Action View Asset URL Helpers
   module Helpers #:nodoc:
     # This module provides methods for generating asset paths and
-    # urls.
+    # URLs.
     #
     #   image_path("rails.png")
     #   # => "/assets/rails.png"
@@ -57,8 +57,8 @@ module ActionView
     # You can read more about setting up your DNS CNAME records from your ISP.
     #
     # Note: This is purely a browser performance optimization and is not meant
-    # for server load balancing. See http://www.die.net/musings/page_load_time/
-    # for background and http://www.browserscope.org/?category=network for
+    # for server load balancing. See https://www.die.net/musings/page_load_time/
+    # for background and https://www.browserscope.org/?category=network for
     # connection limit data.
     #
     # Alternatively, you can exert more control over the asset host by setting
@@ -97,9 +97,10 @@ module ActionView
     # still sending assets for plain HTTP requests from asset hosts. If you don't
     # have SSL certificates for each of the asset hosts this technique allows you
     # to avoid warnings in the client about mixed media.
-    # Note that the request parameter might not be supplied, e.g. when the assets
-    # are precompiled via a Rake task. Make sure to use a +Proc+ instead of a lambda,
-    # since a +Proc+ allows missing parameters and sets them to +nil+.
+    # Note that the +request+ parameter might not be supplied, e.g. when the assets
+    # are precompiled with the command `rails assets:precompile`. Make sure to use a
+    # +Proc+ instead of a lambda, since a +Proc+ allows missing parameters and sets them
+    # to +nil+.
     #
     #   config.action_controller.asset_host = Proc.new { |source, request|
     #     if request && request.ssl?
@@ -149,13 +150,13 @@ module ActionView
       # Below lists scenarios that apply to +asset_path+ whether or not you're
       # using the asset pipeline.
       #
-      # - All fully qualified urls are returned immediately. This bypasses the
+      # - All fully qualified URLs are returned immediately. This bypasses the
       #   asset pipeline and all other behavior described.
       #
       #     asset_path("http://www.example.com/js/xmlhr.js") # => "http://www.example.com/js/xmlhr.js"
       #
       # - All assets that begin with a forward slash are assumed to be full
-      #   urls and will not be expanded. This will bypass the asset pipeline.
+      #   URLs and will not be expanded. This will bypass the asset pipeline.
       #
       #     asset_path("/foo.png") # => "/foo.png"
       #
@@ -187,7 +188,7 @@ module ActionView
         return "" if source.blank?
         return source if URI_REGEXP.match?(source)
 
-        tail, source = source[/([\?#].+)$/], source.sub(/([\?#].+)$/, "".freeze)
+        tail, source = source[/([\?#].+)$/], source.sub(/([\?#].+)$/, "")
 
         if extname = compute_asset_extname(source, options)
           source = "#{source}#{extname}"
